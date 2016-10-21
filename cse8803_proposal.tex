@@ -423,13 +423,22 @@ clinical concepts from the data itself.  Lasko \emph{et
   al.}\cite{Lasko2013} notes the ``traditional'' approach of using
 supervised learning over specific information that a domain expert
 must supply, and notes two main limitations: requiring skilled humans
-to supply correct labels limits its scalability, and relying on
-existing clinical descriptions limits the sorts of patterns that can
-be found.
+to supply correct labels limits its scalability and accuracy, and
+relying on existing clinical descriptions limits the sorts of patterns
+that can be found (and, for instance, may fail to acknowledge that a
+disease treated as a single condition may really have several subtypes
+with different phenotypes; \cite{Lasko2013} cites asthma and heart
+disease as examples of this.)
 
 Some recent papers (\cite{Marlin,Lasko2013,Johnson2016}) cite
 successes with approaches that instead use unsupervised learning on
-time-series data.
+time-series data.  In \cite{Lasko2013}, such an approach applied to
+serum uric acid measurements was able to distinguish gout and acute
+leukemia with no prior classifications given in training.  Marlin
+\emph{et al.}\cite{Marlin} examines 13 physiological measures from a
+pediatric ICU (such as pulse oximetric saturation, heart rate, and
+respiratory rate); Che \emph{et al.}\cite{Che2015} likewise uses ICU
+data, but focuses on certain ICD-9 codes rather than mortality.
 
 Time-series in healthcare data frequently are noisy, spare,
 heterogeneous, or irregularly sampled\cite{Ghassemi2015}, and commonly
@@ -438,28 +447,43 @@ into a more useful form.  In \cite{Lasko2013}, Gaussian process
 regression is used as a transformation step prior to a series of
 autoencoders used for deep learning.  While \cite{Che2015} notes that
 ``shallow'' clustering models such as Gaussian mixture models (as in
-\cite{Marlin}) are used here too, deep learning succeeds more here at
-finding latent factors and extracting concepts.
+\cite{Marlin}) are used too, deep learning succeeds more here at
+finding latent factors and extracting concepts.  Rather than
+transforming input data with Gaussian process regression, this work
+uses an unsupervised stacked denoising autoencoder (SDAE).
 
 \section{Goals}
 
-My goal in this project is to apply similar techniques as in
-\cite{Lasko2013}, but apply them more generally to various laboratory
-measurements available in MIMIC-III\cite{Johnson2016a}.  From this, I
-would like to produce classifiers against some label (such as certain
-ICD-9 codes), and examine their AUC as well as clusterings or reduced
-features which suggest multiple different phenotypes.
+My goal in this project is to apply similar methology as in
+\cite{Lasko2013,Che2015}, but apply it more generally to various
+laboratory measurements (i.e. \texttt{LABEVENTS} table) available in
+MIMIC-III\cite{Johnson2016a}.  As \cite{Marlin} handles ICU data, its
+treatment of data may be more relevant to MIMIC-III, so I may make use
+of techniques from there as well.
+
+From these laboratory measurements and that methodology, I aim to
+produce a transformation to a reduced feature space.  Using labels
+such as certain ICD-9 codes, I will train classifiers from the reduced
+representation, and compute their AUCs for these codes.  I will also
+examine them for apparent clusterings that may suggest multiple
+different phenotypes for some label, as seen in \cite[figure
+  5]{Lasko2013}.
 
 \section{Techniques \& Infrastructure}
 
-I am aiming to implement this work in Apache Spark or Hadoop, likely
-running on Amazon EC2 and AWS.  To implement the autoencoders, I will
-probably make use of some deep learning framework such as
-\href{https://www.tensorflow.org/}{TensorFlow} or
+I am aiming to implement this work in Apache Spark or Hadoop, perhaps
+running on clusters with Amazon EC2 and AWS.  To implement the
+autoencoders, I will probably make use of some deep learning framework
+such as \href{https://www.tensorflow.org/}{TensorFlow} or
 \href{http://caffe.berkeleyvision.org/}{caffe} via
-\href{https://github.com/yahoo/CaffeOnSpark}{CaffeOnSpark}.
+\href{https://github.com/yahoo/CaffeOnSpark}{CaffeOnSpark}.  If I use
+Gaussian process regression, I may make use of
+\texttt{GaussianProcessRegressor} in the
+\href{http://scikit-learn.org/stable/modules/gaussian_process.html}{scikit-learn}
+library, or the \href{https://github.com/jbencook/SparkGP}{SparkGP}
+library.
 
-% \nocite{*}
+\section{Deliverables}
 
 % use section* for acknowledgment
 \section*{Acknowledgment}
