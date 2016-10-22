@@ -457,7 +457,7 @@ extracting concepts.  Rather than transforming input data with
 Gaussian process regression, this work uses an unsupervised stacked
 denoising autoencoder (SDAE).
 
-\section{Goals}
+\section{Goals \& Deliverables}
 
 My goal in this project is to apply similar methology as in
 \cite{Lasko2013,Che2015}, but apply it more generally to various
@@ -467,12 +467,14 @@ treatment of data may be more relevant to MIMIC-III, so I may make use
 of techniques from there as well.
 
 From these laboratory measurements and that methodology, I aim to
-produce a transformation to a reduced feature space.  Using labels
-such as certain ICD-9 codes, I will train classifiers from the reduced
-representation, and compute their AUCs for these codes.  I will also
-examine them for apparent clusterings that may suggest multiple
-different phenotypes for some label, as seen in \cite[figure
-  5]{Lasko2013}.
+produce a transformation to a reduced feature space using a
+combination of Gaussian process regression to condition
+irregularly-sampled input data and autoencoders to learn a
+reduced-dimension form of them.  Using labels such as certain ICD-9
+codes, I will train classifiers from the reduced form, and compute
+their AUCs for these codes.  I will also examine them for apparent
+clusterings that may suggest multiple different phenotypes for some
+label, as seen in \cite[figure 5]{Lasko2013}.
 
 The deliverables of this should include source code of the above, some
 form of trained models that may be applicable outside of MIMIC-III,
@@ -480,7 +482,7 @@ and visualizations (perhaps with
 \href{https://lvdmaaten.github.io/tsne/}{t-SNE}) of the reduced
 feature space representation.
 
-\section{Techniques \& Infrastructure}
+\section{Tools \& Infrastructure}
 
 I am aiming to implement this work in Apache Spark or Hadoop, perhaps
 running on clusters with Amazon EC2 and AWS.  To implement the
