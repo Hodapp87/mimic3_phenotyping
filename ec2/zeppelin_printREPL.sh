@@ -38,3 +38,5 @@ cat <<EOF | sudo /usr/bin/patch -p0 -b -t
           "remote": true,
           "perNoteSession": false,
 EOF
+
+sudo /usr/lib/zeppelin/bin/zeppelin-daemon.sh restart
