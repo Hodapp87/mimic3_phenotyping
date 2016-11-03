@@ -16,7 +16,7 @@ case class PatientEventSeries(
   item_id: Int,
   unit: String,
   // why must I fully-qualify this despite importing?
-  series: Iterable[(java.sql.Timestamp, String)]
+  series: List[(java.sql.Timestamp, String)]
 )
 
 case class LabItem(
@@ -35,25 +35,25 @@ object Main {
     Logger.getLogger("org").setLevel(Level.WARN)
     Logger.getLogger("akka").setLevel(Level.WARN)
 
-    val sc = Utils.createContext
-    val sqlctxt = new SQLContext(sc)
-    import sqlctxt.implicits._
+    val spark = Utils.createContext
+    import spark.implicits._
 
     // These are small enough to cache:
     val d_icd_diagnoses = Utils.csv_from_s3(
-      sqlctxt, "D_ICD_DIAGNOSES", Some(d_icd_diagnoses_schema))
+      spark, "D_ICD_DIAGNOSES", Some(d_icd_diagnoses_schema))
     d_icd_diagnoses.cache()
 
+    val d_labitems = Utils.csv_from_s3(
+      spark, "D_LABITEMS", Some(d_labitems_schema))
     // D_LABITEMS is fairly small, so make a map of it:
-    val labitems : Map[Int,LabItem] = Utils.csv_from_s3(
-      sqlctxt, "D_LABITEMS", Some(d_labitems_schema)).
+    val labitemMap : Map[Int,LabItem] = d_labitems.
       rdd.map { r: Row =>
         val li = LabItem(r.getAs("ITEMID"), r.getAs("LABEL"),
           r.getAs("FLUID"), r.getAs("CATEGORY"), r.getAs("LOINC_CODE"))
         (li.item_id, li)
       }.collect.toMap
 
-    val loinc = sqlctxt.
+    val loinc = spark.
       read.
       format("com.databricks.spark.csv").
       option("header", "true").
@@ -62,13 +62,33 @@ object Main {
     //loinc.cache()
 
     val patients = Utils.csv_from_s3(
-      sqlctxt, "PATIENTS", Some(patients_schema))
+      spark, "PATIENTS", Some(patients_schema))
     val labevents = Utils.csv_from_s3(
-      sqlctxt, "LABEVENTS", Some(labevents_schema))
+      spark, "LABEVENTS", Some(labevents_schema))
     val diagnoses_icd = Utils.csv_from_s3(
-      sqlctxt, "DIAGNOSES_ICD", Some(diagnoses_schema))
+      spark, "DIAGNOSES_ICD", Some(diagnoses_schema))
 
     val lab_ts = labevents.
+      join(d_labitems, "ITEMID").
+      groupByKey { r: Row =>
+        (r.getAs[Int]("SUBJECT_ID"),
+          r.getAs[Int]("HADM_ID"),
+          r.getAs[Int]("ITEMID"),
+          r.getAs[String]("VALUEUOM"))
+      }.mapGroups { (group, rows) =>
+        val series = rows.map { r =>
+          (r.getAs[Timestamp]("CHARTTIME"),
+            r.getAs[String]("VALUE"))
+        }.toList
+        0
+        /*group match {
+          case (subj,hadm,item,uom) =>
+            PatientEventSeries(subj, hadm, item, uom, series)
+        }*/
+      }
+    lab_ts.persist(StorageLevel.MEMORY_AND_DISK)
+
+    val lab_ts2 = labevents.
       rdd.map { row =>
         ((row.getAs[Int]("SUBJECT_ID"),
           row.getAs[Int]("HADM_ID"),
@@ -82,10 +102,10 @@ object Main {
       }.groupByKey.map { case ((subj, adm, item), l) =>
           // This is clunky (what if units may differ?):
           val unit = l.toList(0)._1
-          val series = l.map { case (_,t,v) => (t,v) }
+          val series = l.map { case (_,t,v) => (t,v) }.toList
           PatientEventSeries(subj, adm, item, unit, series)
       }
-    lab_ts.persist(StorageLevel.MEMORY_AND_DISK)
+    lab_ts2.persist(StorageLevel.MEMORY_AND_DISK)
 
     /*
     val groups_with_type = labs_grouped.

@@ -1,9 +1,6 @@
 package edu.gatech.cse8803.util
 
-import org.apache.spark.{SparkConf, SparkContext}                 
-import org.apache.spark.rdd.RDD
 import org.apache.spark.sql._
-import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
 
 object Utils {
@@ -14,11 +11,11 @@ object Utils {
    * with the same base name.  In the process, this prints out the schema used
    * (for the sake of easier loading later)
    */
-  def csv_from_s3(sqlContext : SQLContext, base : String, schema : Option[StructType] = None) : DataFrame = {
+  def csv_from_s3(spark : SparkSession, base : String, schema : Option[StructType] = None) : DataFrame = {
     val s3_dir = "s3://bd4h-mimic3/"
     val schema_fn = (f : DataFrameReader) =>
     if (schema.isDefined) f.schema(schema.get) else f
-    val df = schema_fn(sqlContext.
+    val df = schema_fn(spark.
       read.
       format("com.databricks.spark.csv").
       option("header", "true").
@@ -45,15 +42,20 @@ object Utils {
     println(f"%%table ${hdr}\n ${table}")
   }
 
-  def createContext(appName: String, masterUrl: String): SparkContext = {
-    val conf = new SparkConf().setAppName(appName).setMaster(masterUrl)
-    new SparkContext(conf)
+  def getSession() = {
   }
 
-  def createContext(appName: String): SparkContext =
+  def createContext(appName: String, masterUrl: String): SparkSession = {
+    SparkSession.builder.
+      master(masterUrl)
+      .appName(appName)
+      .getOrCreate()
+  }
+
+  def createContext(appName: String): SparkSession =
     createContext(appName, "local[*]")
 
-  def createContext: SparkContext =
+  def createContext: SparkSession =
     createContext("CSE-8803 project", "local[*]")
   
 }
