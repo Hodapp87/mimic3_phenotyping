@@ -16,7 +16,7 @@ case class PatientEventSeries(
   item_id: Int,
   unit: String,
   // why must I fully-qualify this despite importing?
-  series: List[(java.sql.Timestamp, String)]
+  series: Seq[(java.sql.Timestamp, String)]
 )
 
 case class LabItem(
@@ -26,6 +26,9 @@ case class LabItem(
   category: String,
   loincCode: String
 )
+
+// This is used only for lab_ts_wtf, the test case from hell:
+case class WTF(a1 : Int, a2 : Int, a3 : Int, a4 : String)
 
 object Main {
   def main(args: Array[String]) {
@@ -68,10 +71,18 @@ object Main {
     val diagnoses_icd = Utils.csv_from_s3(
       spark, "DIAGNOSES_ICD", Some(diagnoses_schema))
 
-    val lab_ts = labevents.
-      join(d_labitems, "ITEMID").
+    // Below is causing NullPointerException for some reason.  It
+    // seems to happen even if I take just the groupByKey output.  It
+    // goes away if I group on only two elements.
+    //
+    // If I don't solve this bullshit soon, I should just use the
+    // slower RDD-based method.
+    //
+    // Related to this maybe?
+    // https://issues.apache.org/jira/browse/SPARK-12063
+    val lab_ts_wtf = labevents.
       groupByKey { r: Row =>
-        (r.getAs[Int]("SUBJECT_ID"),
+        WTF(r.getAs[Int]("SUBJECT_ID"),
           r.getAs[Int]("HADM_ID"),
           r.getAs[Int]("ITEMID"),
           r.getAs[String]("VALUEUOM"))
@@ -79,16 +90,16 @@ object Main {
         val series = rows.map { r =>
           (r.getAs[Timestamp]("CHARTTIME"),
             r.getAs[String]("VALUE"))
-        }.toList
-        0
-        /*group match {
-          case (subj,hadm,item,uom) =>
+        }.toSeq
+        group match {
+          case WTF(subj,hadm,item,uom) =>
             PatientEventSeries(subj, hadm, item, uom, series)
-        }*/
+        }
       }
-    lab_ts.persist(StorageLevel.MEMORY_AND_DISK)
+    lab_ts_wtf.persist(StorageLevel.MEMORY_AND_DISK)
 
-    val lab_ts2 = labevents.
+    // This is slower, but lacks that NullPointerException:
+    val lab_ts = labevents.
       rdd.map { row =>
         ((row.getAs[Int]("SUBJECT_ID"),
           row.getAs[Int]("HADM_ID"),
@@ -105,7 +116,7 @@ object Main {
           val series = l.map { case (_,t,v) => (t,v) }.toList
           PatientEventSeries(subj, adm, item, unit, series)
       }
-    lab_ts2.persist(StorageLevel.MEMORY_AND_DISK)
+    lab_ts.persist(StorageLevel.MEMORY_AND_DISK)
 
     /*
     val groups_with_type = labs_grouped.
