@@ -1,6 +1,5 @@
 package edu.gatech.cse8803.main
 
-import org.apache.spark.{SparkConf, SparkContext}                 
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
@@ -8,6 +7,25 @@ import org.apache.spark.sql.types._
 import org.apache.spark.storage.StorageLevel
 import java.sql.Timestamp
 import com.cloudera.sparkts._
+
+import edu.gatech.cse8803.util.Utils
+
+case class PatientEventSeries(
+  subject_id: Int,
+  adm_id: Int,
+  item_id: Int,
+  unit: String,
+  // why must I fully-qualify this despite importing?
+  series: Iterable[(java.sql.Timestamp, String)]
+)
+
+case class LabItem(
+  item_id: Int,
+  label: String,
+  fluid: String,
+  category: String,
+  loincCode: String
+)
 
 object Main {
   def main(args: Array[String]) {
@@ -17,25 +35,59 @@ object Main {
     Logger.getLogger("org").setLevel(Level.WARN)
     Logger.getLogger("akka").setLevel(Level.WARN)
 
-    val sc = createContext
+    val sc = Utils.createContext
     val sqlctxt = new SQLContext(sc)
     import sqlctxt.implicits._
 
-    val patients = csv_from_s3(sqlctxt, "PATIENTS", Some(patients_schema))
-    val d_labitems = csv_from_s3(sqlctxt, "D_LABITEMS", Some(d_labitems_schema))
-    d_labitems.cache()
-    val labevents = csv_from_s3(sqlctxt, "LABEVENTS", Some(labevents_schema))
-    val diagnoses_icd = csv_from_s3(sqlctxt, "DIAGNOSES_ICD", Some(diagnoses_schema))
-    val d_icd_diagnoses = csv_from_s3(sqlctxt, "D_ICD_DIAGNOSES", Some(d_icd_diagnoses_schema))
+    // These are small enough to cache:
+    val d_icd_diagnoses = Utils.csv_from_s3(
+      sqlctxt, "D_ICD_DIAGNOSES", Some(d_icd_diagnoses_schema))
+    d_icd_diagnoses.cache()
+
+    // D_LABITEMS is fairly small, so make a map of it:
+    val labitems : Map[Int,LabItem] = Utils.csv_from_s3(
+      sqlctxt, "D_LABITEMS", Some(d_labitems_schema)).
+      rdd.map { r: Row =>
+        val li = LabItem(r.getAs("ITEMID"), r.getAs("LABEL"),
+          r.getAs("FLUID"), r.getAs("CATEGORY"), r.getAs("LOINC_CODE"))
+        (li.item_id, li)
+      }.collect.toMap
 
     val loinc = sqlctxt.
       read.
       format("com.databricks.spark.csv").
       option("header", "true").
       load("s3://bd4h-mimic3/LOINC_2.56_Text/loinc.csv")
-    loinc.createOrReplaceTempView("loinc")
-    loinc.cache()
+    //loinc.createOrReplaceTempView("loinc")
+    //loinc.cache()
 
+    val patients = Utils.csv_from_s3(
+      sqlctxt, "PATIENTS", Some(patients_schema))
+    val labevents = Utils.csv_from_s3(
+      sqlctxt, "LABEVENTS", Some(labevents_schema))
+    val diagnoses_icd = Utils.csv_from_s3(
+      sqlctxt, "DIAGNOSES_ICD", Some(diagnoses_schema))
+
+    val lab_ts = labevents.
+      rdd.map { row =>
+        ((row.getAs[Int]("SUBJECT_ID"),
+          row.getAs[Int]("HADM_ID"),
+          row.getAs[Int]("ITEMID")),
+          (row.getAs[String]("VALUEUOM"),
+            row.getAs[Timestamp]("CHARTTIME"),
+            row.getAs[String]("VALUE"))
+        )
+        // ((subject ID, adm. ID, item ID),
+        //  (unit, value, time))
+      }.groupByKey.map { case ((subj, adm, item), l) =>
+          // This is clunky (what if units may differ?):
+          val unit = l.toList(0)._1
+          val series = l.map { case (_,t,v) => (t,v) }
+          PatientEventSeries(subj, adm, item, unit, series)
+      }
+    lab_ts.persist(StorageLevel.MEMORY_AND_DISK)
+
+    /*
     val groups_with_type = labs_grouped.
       join(d_labitems, "ITEMID").
       join(loinc, loinc("LOINC_NUM") === d_labitems("LOINC_CODE")).
@@ -51,55 +103,9 @@ object Main {
       count.
       orderBy(desc("count"))
     labs_grouped.persist(StorageLevel.MEMORY_AND_DISK)
+     */
 
     println("Hello, World")
-  }
-
-  /** Pretty-print a dataframe for Zeppelin.  Either supply
-   * a number of rows to take, or 'None' to take all of them.
-   */
-  def pprint(df : DataFrame, n : Some[Int]) = {
-    val hdr = df.columns.mkString("\t")
-    val array = if (n.isDefined) df.take(n.get) else df.collect
-    val table = array.map { _.mkString("\t") }.mkString("\n")
-    println(f"%%table ${hdr}\n ${table}")
-  }
-
-  case class PatientEventSeries(
-    subject_id: Int,
-    adm_id: Int,
-    loinc_id: String,
-    unit: String,
-    // why must I fully-qualify this despite importing?
-    series: List[(java.sql.Timestamp, Double)]
-  )
-
-  /****************************************************************************
-   * Factor out this common functionality into a function:  Look in s3_dir
-   * (where I've placed the MIMIC-III data) for a .csv.gz file with the given
-   * name.  Return the dataframe for that CSV, and also create a temp table
-   * with the same base name.  In the process, this prints out the schema used
-   * (for the sake of easier loading later)
-   *****************************************************************************/
-  def csv_from_s3(sqlContext : SQLContext, base : String, schema : Option[StructType] = None) : DataFrame = {
-    val s3_dir = "s3://bd4h-mimic3/"
-    val schema_fn = (f : DataFrameReader) =>
-    if (schema.isDefined) f.schema(schema.get) else f
-    val df = schema_fn(sqlContext.
-      read.
-      format("com.databricks.spark.csv").
-      option("header", "true").
-      option("mode", "DROPMALFORMED")).
-      load(f"${s3_dir}${base}.csv.gz")
-    
-    if (!schema.isDefined) {
-      println("Inferred schema:")
-      print(df.schema)
-    }
-    
-    df.createOrReplaceTempView(base)
-    
-    df
   }
 
   val patients_schema = StructType(Array(
@@ -150,37 +156,26 @@ object Main {
   ))
 
   /*
-   val admissions = csv_from_s3("ADMISSIONS")
-   val callout = csv_from_s3("CALLOUT")
-   val caregivers = csv_from_s3("CAREGIVERS")
-   val chartevents = csv_from_s3("CHARTEVENTS")
-   val cptevents = csv_from_s3("CPTEVENTS")
-   val datetimeevents = csv_from_s3("DATETIMEEVENTS")
-   val drgcodes = csv_from_s3("DRGCODES")
-   val d_cpt = csv_from_s3("D_CPT")
-   val d_icd_procedures = csv_from_s3("D_ICD_PROCEDURES")
-   val d_items = csv_from_s3("D_ITEMS")
-   val icustays = csv_from_s3("ICUSTAYS")
-   val inputevents_cv = csv_from_s3("INPUTEVENTS_CV")
-   val inputevents_mv = csv_from_s3("INPUTEVENTS_MV")
-   val microbiologyevents = csv_from_s3("MICROBIOLOGYEVENTS")
-   val noteevents = csv_from_s3("NOTEEVENTS")
-   val outputevents = csv_from_s3("OUTPUTEVENTS")
-   val prescriptions = csv_from_s3("PRESCRIPTIONS")
-   val procedureevents_mv = csv_from_s3("PROCEDUREEVENTS_MV")
-   val procedures_icd = csv_from_s3("PROCEDURES_ICD")
-   val services = csv_from_s3("SERVICES")
-   val transfers = csv_from_s3("TRANSFERS")
+   val admissions = Utils.csv_from_s3("ADMISSIONS")
+   val callout = Utils.csv_from_s3("CALLOUT")
+   val caregivers = Utils.csv_from_s3("CAREGIVERS")
+   val chartevents = Utils.csv_from_s3("CHARTEVENTS")
+   val cptevents = Utils.csv_from_s3("CPTEVENTS")
+   val datetimeevents = Utils.csv_from_s3("DATETIMEEVENTS")
+   val drgcodes = Utils.csv_from_s3("DRGCODES")
+   val d_cpt = Utils.csv_from_s3("D_CPT")
+   val d_icd_procedures = Utils.csv_from_s3("D_ICD_PROCEDURES")
+   val d_items = Utils.csv_from_s3("D_ITEMS")
+   val icustays = Utils.csv_from_s3("ICUSTAYS")
+   val inputevents_cv = Utils.csv_from_s3("INPUTEVENTS_CV")
+   val inputevents_mv = Utils.csv_from_s3("INPUTEVENTS_MV")
+   val microbiologyevents = Utils.csv_from_s3("MICROBIOLOGYEVENTS")
+   val noteevents = Utils.csv_from_s3("NOTEEVENTS")
+   val outputevents = Utils.csv_from_s3("OUTPUTEVENTS")
+   val prescriptions = Utils.csv_from_s3("PRESCRIPTIONS")
+   val procedureevents_mv = Utils.csv_from_s3("PROCEDUREEVENTS_MV")
+   val procedures_icd = Utils.csv_from_s3("PROCEDURES_ICD")
+   val services = Utils.csv_from_s3("SERVICES")
+   val transfers = Utils.csv_from_s3("TRANSFERS")
    */
-
-  def createContext(appName: String, masterUrl: String): SparkContext = {
-    val conf = new SparkConf().setAppName(appName).setMaster(masterUrl)
-    new SparkContext(conf)
-  }
-
-  def createContext(appName: String): SparkContext =
-    createContext(appName, "local[*]")
-
-  def createContext: SparkContext =
-    createContext("CSE-8803 project", "local[*]")
 }
