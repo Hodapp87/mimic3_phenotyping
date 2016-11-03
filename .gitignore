@@ -5,3 +5,6 @@ cse8803*.aux
 cse8803*.log
 cse8803*.blg
 cse8803*.bbl
+.ensime*
+code/target/*
+code/project/*
