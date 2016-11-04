@@ -1,22 +1,21 @@
 package edu.gatech.cse8803.main
 
-import org.apache.spark.rdd.RDD
+// import org.apache.spark.rdd.RDD
 import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.types._
 import org.apache.spark.storage.StorageLevel
 import java.sql.Timestamp
-import com.cloudera.sparkts._
+// import com.cloudera.sparkts._
 
 import edu.gatech.cse8803.util.Utils
+import edu.gatech.cse8803.util.Schemas
 
 case class PatientEventSeries(
   subject_id: Int,
   adm_id: Int,
   item_id: Int,
   unit: String,
-  // why must I fully-qualify this despite importing?
-  series: Seq[(java.sql.Timestamp, String)]
+  series: Seq[(Timestamp, String)]
 )
 
 case class LabItem(
@@ -43,11 +42,11 @@ object Main {
 
     // These are small enough to cache:
     val d_icd_diagnoses = Utils.csv_from_s3(
-      spark, "D_ICD_DIAGNOSES", Some(d_icd_diagnoses_schema))
+      spark, "D_ICD_DIAGNOSES", Some(Schemas.d_icd_diagnoses))
     d_icd_diagnoses.cache()
 
     val d_labitems = Utils.csv_from_s3(
-      spark, "D_LABITEMS", Some(d_labitems_schema))
+      spark, "D_LABITEMS", Some(Schemas.d_labitems))
     // D_LABITEMS is fairly small, so make a map of it:
     val labitemMap : Map[Int,LabItem] = d_labitems.
       rdd.map { r: Row =>
@@ -65,11 +64,11 @@ object Main {
     //loinc.cache()
 
     val patients = Utils.csv_from_s3(
-      spark, "PATIENTS", Some(patients_schema))
+      spark, "PATIENTS", Some(Schemas.patients))
     val labevents = Utils.csv_from_s3(
-      spark, "LABEVENTS", Some(labevents_schema))
+      spark, "LABEVENTS", Some(Schemas.labevents))
     val diagnoses_icd = Utils.csv_from_s3(
-      spark, "DIAGNOSES_ICD", Some(diagnoses_schema))
+      spark, "DIAGNOSES_ICD", Some(Schemas.diagnoses))
 
     // Below is causing NullPointerException for some reason.  It
     // seems to happen even if I take just the groupByKey output.  It
@@ -136,55 +135,22 @@ object Main {
     labs_grouped.persist(StorageLevel.MEMORY_AND_DISK)
      */
 
+    // ICD9 counts per-patient:
+    val icd9counts = diagnoses_icd.
+      groupBy("SUBJECT_ID", "ICD9_CODE").
+      count.
+      sort(desc("count")).
+      join(d_icd_diagnoses, "ICD9_CODE")
+
+    // Per-patient, per-encounter:
+    val icd9counts_adm = diagnoses_icd.
+      groupBy("SUBJECT_ID", "ICD9_CODE", "HADM_ID").
+      count.
+      sort(desc("count")).
+      join(d_icd_diagnoses, "ICD9_CODE")
+    
     println("Hello, World")
   }
-
-  val patients_schema = StructType(Array(
-    StructField("ROW_ID",IntegerType,true),
-    StructField("SUBJECT_ID",IntegerType,true),
-    StructField("GENDER",StringType,true),
-    StructField("DOB",TimestampType,true),
-    StructField("DOD",TimestampType,true),
-    StructField("DOD_HOSP",TimestampType,true),
-    StructField("DOD_SSN",TimestampType,true),
-    StructField("EXPIRE_FLAG",StringType,true)
-  ))
-
-  val d_labitems_schema = StructType(Array(
-    StructField("ROW_ID",IntegerType,true),
-    StructField("ITEMID",IntegerType,true),
-    StructField("LABEL",StringType,true),
-    StructField("FLUID",StringType,true),
-    StructField("CATEGORY",StringType,true),
-    StructField("LOINC_CODE",StringType,true)
-  ))
-
-  val labevents_schema = StructType(Array(
-    StructField("ROW_ID",IntegerType,true),
-    StructField("SUBJECT_ID",IntegerType,true),
-    StructField("HADM_ID",IntegerType,true),
-    StructField("ITEMID",IntegerType,true),
-    StructField("CHARTTIME",TimestampType,true),
-    StructField("VALUE",StringType,true),
-    StructField("VALUENUM",DoubleType,true),
-    StructField("VALUEUOM",StringType,true),
-    StructField("FLAG",StringType,true)
-  ))
-
-  val diagnoses_schema = StructType(Array(
-    StructField("ROW_ID",IntegerType,true),
-    StructField("SUBJECT_ID",IntegerType,true),
-    StructField("HADM_ID",IntegerType,true),
-    StructField("SEQ_NUM",IntegerType,true),
-    StructField("ICD9_CODE",StringType,true)
-  ))
-
-  val d_icd_diagnoses_schema = StructType(Array(
-    StructField("ROW_ID",IntegerType,true),
-    StructField("ICD9_CODE",StringType,true),
-    StructField("SHORT_TITLE",StringType,true),
-    StructField("LONG_TITLE",StringType,true)
-  ))
 
   /*
    val admissions = Utils.csv_from_s3("ADMISSIONS")

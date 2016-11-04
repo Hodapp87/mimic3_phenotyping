@@ -39,7 +39,10 @@ object Utils {
     val hdr = df.columns.mkString("\t")
     val array = if (n.isDefined) df.take(n.get) else df.collect
     val table = array.map { _.mkString("\t") }.mkString("\n")
-    println(f"%%table ${hdr}\n ${table}")
+    // To use with Zeppelin, switch out the below:
+    //val zeppelin_pfx = "%table "
+    val zeppelin_pfx = " "
+    println(f"${zeppelin_pfx}${hdr}\n${table}")
   }
 
   def getSession() = {
