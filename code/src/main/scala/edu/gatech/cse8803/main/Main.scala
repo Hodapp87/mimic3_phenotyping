@@ -73,26 +73,104 @@ object Main {
 
     // What is the minimum length (number of samples/events) in a
     // time-series that we'll consider for a given admission & item?
-    val lab_min_series = 100
+    val lab_min_series = 50
     val lab_min_patients = 30
 
-    val lab_good_items = labevents.
+    // Get (HADM_ID, ITEM_ID) for those admissions and lab items which
+    // meet 'lab_min_series':
+    val labs_length_ok : DataFrame = labevents.
       groupBy("HADM_ID", "ITEMID").
-      // How long is this time-series (for the given admission & lab
-      // item)?
+      // How long is this time-series for given admission & lab item?
       count.
       filter($"count" >= lab_min_series).
+      select("HADM_ID", "ITEMID")
+
+    // Get ITEM_ID for those lab items which meet both
+    // 'lab_min_series' and 'lab_min_patients'.
+    val labs_patients_ok : DataFrame = labs_length_ok.
       groupBy("ITEMID").
       // How many times does this item occur, given that we're
       // concerned only with length >= lab_min_series?
       count.
       filter($"count" >= lab_min_patients)
-    lab_good_items.persist(StorageLevel.MEMORY_AND_DISK)
+
+    // Finally, get all (HADM_ID, ITEM_ID) that satisfy both:
+    val labs_good_df : DataFrame = labs_patients_ok.
+      join(labs_length_ok, "ITEMID").
+      // join is supposed to be an inner join, but whatever...
+      filter(not(isnull($"HADM_ID"))).
+      select("HADM_ID", "ITEMID")
+
+    labs_patients_ok.cache()
+    labs_good_df.cache()
+
+    // For 'nice' output of just which lab items are relevant (and the
+    // human-readable form):
+    labs_patients_ok.
+      dropDuplicates("ITEMID").
+      join(d_labitems, "ITEMID").
+      sort(desc("count")).
+      coalesce(1).
+      write.
+      format("com.databricks.spark.csv").
+      option("header", "true").
+      save("s3://bd4h-mimic3/temp/labs.csv")
+    // and then both labs & admissions:
+    labs_good_df.
+      coalesce(1).
+      write.
+      format("com.databricks.spark.csv").
+      option("header", "true").
+      save("s3://bd4h-mimic3/temp/labs_and_admissions.csv")
+
+    // How many unique ICD-9 diagnoses accompany each admission & lab
+    // item?
+    val icd9_per_pair : DataFrame = labs_good_df.
+      join(diagnoses_icd, "HADM_ID").
+      groupBy("HADM_ID", "ITEMID").
+      count.
+      withColumnRenamed("count", "icd9_unique_count")
+    icd9_per_pair.
+      coalesce(1).
+      write.
+      format("com.databricks.spark.csv").
+      option("header", "true").
+      save("s3://bd4h-mimic3/temp/icd9_per_pair.csv")
+
+    // How many unique (admission, lab items) accompany each ICD-9
+    // code present?  ('lab item' here refers to the entire
+    // time-series, not every sample from it.)
+    val pairs_per_icd9 : DataFrame = labs_good_df.
+      join(diagnoses_icd, "HADM_ID").
+      groupBy("ICD9_CODE").
+      count.
+      withColumnRenamed("count", "adm_and_lab_count").
+      // Make a little more human-readable:
+      join(d_icd_diagnoses, "ICD9_CODE").
+      sort(desc("adm_and_lab_count"))
+    pairs_per_icd9.cache()
+    pairs_per_icd9.
+      coalesce(1).
+      write.
+      format("com.databricks.spark.csv").
+      option("header", "true").
+      save("s3://bd4h-mimic3/temp/pairs_per_icd9.csv")
+
+    // Get the actual time-series for the selected admissions & lab
+    // items:
+    val lab_ts = labs_good_df.
+      join(labevents, Seq("HADM_ID", "ITEMID"))
+    lab_ts.
+      coalesce(1).
+      write.
+      format("com.databricks.spark.csv").
+      option("header", "true").
+      save("s3://bd4h-mimic3/temp/lab_timeseries.csv")
 
     // Get lab time-series for each: subject, admission, item
     // (i.e. which lab test), and unit (which should be identical
     // per-item).
-    val lab_ts = labevents.
+    val lab_ts2 = labevents.
       groupByKey { r: Row =>
         LabWrapper(r.getAs[Int]("SUBJECT_ID"),
           r.getAs[Int]("HADM_ID"),
@@ -108,7 +186,7 @@ object Main {
             PatientEventSeries(subj, hadm, item, uom, series)
         }
       }
-    lab_ts.persist(StorageLevel.MEMORY_AND_DISK)
+    lab_ts2.persist(StorageLevel.MEMORY_AND_DISK)
     // Above is causing NullPointerException for some reason if I
     // modify the LabWrapper to instead just be a tuple (and likewise
     // change the pattern-match to be over a tuple).  It seems to
