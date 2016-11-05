@@ -35,7 +35,7 @@ object Utils {
   /** Pretty-print a dataframe for Zeppelin.  Either supply
    * a number of rows to take, or 'None' to take all of them.
    */
-  def pprint(df : DataFrame, n : Some[Int]) = {
+  def pprint(df : DataFrame, n : Option[Int] = None) = {
     val hdr = df.columns.mkString("\t")
     val array = if (n.isDefined) df.take(n.get) else df.collect
     val table = array.map { _.mkString("\t") }.mkString("\n")
