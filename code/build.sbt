@@ -22,3 +22,7 @@ libraryDependencies ++= Seq(
 )
 
 parallelExecution in Test := false
+
+// spark-shell --packages "com.cloudera.sparkts:sparkts:0.4.0"
+// Perhaps also consult:
+// https://stackoverflow.com/questions/37643831/how-to-run-spark-shell-with-local-packages
