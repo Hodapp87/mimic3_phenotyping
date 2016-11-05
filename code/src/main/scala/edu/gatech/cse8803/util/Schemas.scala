@@ -4,6 +4,7 @@ import org.apache.spark.sql.types._
 
 object Schemas {
 
+  // https://mimic.physionet.org/mimictables/patients/
   val patients = StructType(Array(
     StructField("ROW_ID",IntegerType,true),
     StructField("SUBJECT_ID",IntegerType,true),
@@ -15,6 +16,7 @@ object Schemas {
     StructField("EXPIRE_FLAG",StringType,true)
   ))
 
+  // https://mimic.physionet.org/mimictables/d_labitems/
   val d_labitems = StructType(Array(
     StructField("ROW_ID",IntegerType,true),
     StructField("ITEMID",IntegerType,true),
@@ -24,6 +26,7 @@ object Schemas {
     StructField("LOINC_CODE",StringType,true)
   ))
 
+  // https://mimic.physionet.org/mimictables/labevents/
   val labevents = StructType(Array(
     StructField("ROW_ID",IntegerType,true),
     StructField("SUBJECT_ID",IntegerType,true),
@@ -36,6 +39,7 @@ object Schemas {
     StructField("FLAG",StringType,true)
   ))
 
+  // https://mimic.physionet.org/mimictables/diagnoses_icd/
   val diagnoses = StructType(Array(
     StructField("ROW_ID",IntegerType,true),
     StructField("SUBJECT_ID",IntegerType,true),
@@ -44,6 +48,7 @@ object Schemas {
     StructField("ICD9_CODE",StringType,true)
   ))
 
+  // https://mimic.physionet.org/mimictables/d_icd_diagnoses/
   val d_icd_diagnoses = StructType(Array(
     StructField("ROW_ID",IntegerType,true),
     StructField("ICD9_CODE",StringType,true),
