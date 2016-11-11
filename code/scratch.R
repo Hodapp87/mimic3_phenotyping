@@ -14,19 +14,15 @@ library(SparkR, lib.loc = c(file.path(Sys.getenv("SPARK_HOME"), "R", "lib")))
 #local is used here because the RStudio server 
 #was installed on the master node
 
-sc <- sparkR.init(master = "local[*]", sparkEnvir = list(spark.driver.memory="2g"))
+sc <- sparkR.session(master = "local[*]", sparkEnvir = list(spark.driver.memory="2g"))
 # TODO: Can I make this use YARN instead?
 # sqlContext <- sparkRSQL.init(sc) 
 
-ts <- SparkR::read.parquet("s3://bd4h-mimic3/temp/lab_timeseries.parquet")
+ts <- SparkR::read.parquet("s3://bd4h-mimic3/temp/labs_cohort_518_584.parquet")
 printSchema(ts)
 
-ts_f <- collect(filter(ts, ts$HADM_ID == 124271 & ts$ITEMID == 51221))
-
-ggplot(ts_f, aes(x=CHARTTIME, y=VALUENUM)) + xlab("Chart time") + ylab("Value") + geom_line()
-
-ts_multi <- collect(filter(ts, ts$HADM_ID == 124271))
-ggplot(ts_multi, aes(x=CHARTTIME, y=VALUENUM, group = ITEMID)) +
+ts_multi <- collect(filter(ts, (ts$SUBJECT_ID == 18944) | (ts$SUBJECT_ID == 68135) | (ts$SUBJECT_ID == 6466)))
+ggplot(ts_multi, aes(x=CHARTTIME_REL, y=VALUENUM, group = SUBJECT_ID)) +
   xlab("Chart time") +
   ylab("Value") +
-  geom_line(aes(colour = factor(ITEMID)))
+  geom_line(aes(colour = factor(SUBJECT_ID)))
