@@ -6,6 +6,7 @@ import edu.gatech.cse8803.util.Schemas
 // import org.apache.spark.rdd.RDD
 import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
+import org.apache.spark.sql.types._
 import org.apache.spark.storage.StorageLevel
 import java.sql.Timestamp
 // import com.cloudera.sparkts._
@@ -68,13 +69,20 @@ object Main {
       spark, "PATIENTS", Some(Schemas.patients))
     val labevents = Utils.csv_from_s3(
       spark, "LABEVENTS", Some(Schemas.labevents))
+    // For DIAGNOSES_ICD, also get the ICD9 category (which we reuse
+    // in various places):
     val diagnoses_icd = Utils.csv_from_s3(
-      spark, "DIAGNOSES_ICD", Some(Schemas.diagnoses))
+      spark, "DIAGNOSES_ICD", Some(Schemas.diagnoses)).
+      withColumn("ICD9_CATEGORY", $"ICD9_CODE".substr(0, 3))
 
     // What is the minimum length (number of samples/events) in a
     // time-series that we'll consider for a given admission & item?
     val lab_min_series = 50
     val lab_min_patients = 30
+
+    // Two ICD codes; we want one or the other, but not both.
+    val icd_code1 = "518"
+    val icd_code2 = "584"
 
     // Get (HADM_ID, ITEM_ID) for those admissions and lab items which
     // meet 'lab_min_series':
@@ -84,6 +92,29 @@ object Main {
       count.
       filter($"count" >= lab_min_series).
       select("HADM_ID", "ITEMID")
+
+    // Get those admissions which had >= 1 diagnosis of icd_code1, or
+    // of icd_code2, but not diagnoses of both.
+    val diag_cohort : DataFrame = diagnoses_icd.
+      withColumn("is_code1", ($"ICD9_CATEGORY" === icd_code1).cast(IntegerType)).
+      withColumn("is_code2", ($"ICD9_CATEGORY" === icd_code2).cast(IntegerType)).
+      groupBy("HADM_ID").
+      sum("is_code1", "is_code2").
+      filter(($"sum(is_code1)" > 0) =!= ($"sum(is_code2)" > 0))
+
+    /***********************************************************************
+     * Exploratory stuff
+     ***********************************************************************/
+
+    // To bypass:
+    /*
+    val labs_patients_ok = spark.read.parquet("s3://bd4h-mimic3/temp/labs.parquet")
+    val labs_good_df = spark.read.parquet("s3://bd4h-mimic3/temp/labs_and_admissions.parquet")
+    val icd9_per_pair = spark.read.parquet("s3://bd4h-mimic3/temp/icd9_per_pair.parquet")
+    val pairs_per_icd9 = spark.read.parquet("s3://bd4h-mimic3/temp/pairs_per_icd9.parquet")
+    val pairs_per_icd9_category = spark.read.parquet("s3://bd4h-mimic3/temp/pairs_per_icd9_category.parquet")
+    val lab_ts = spark.read.parquet("s3://bd4h-mimic3/temp/lab_timeseries.parquet")
+     */
 
     // Get ITEM_ID for those lab items which meet both
     // 'lab_min_series' and 'lab_min_patients'.
@@ -112,16 +143,12 @@ object Main {
       sort(desc("count")).
       coalesce(1).
       write.
-      format("com.databricks.spark.csv").
-      option("header", "true").
-      save("s3://bd4h-mimic3/temp/labs.csv")
+      parquet("s3://bd4h-mimic3/temp/labs.parquet")
     // and then both labs & admissions:
     labs_good_df.
       coalesce(1).
       write.
-      format("com.databricks.spark.csv").
-      option("header", "true").
-      save("s3://bd4h-mimic3/temp/labs_and_admissions.csv")
+      parquet("s3://bd4h-mimic3/temp/labs_and_admissions.parquet")
 
     // How many unique ICD-9 diagnoses accompany each admission & lab
     // item?
@@ -133,9 +160,7 @@ object Main {
     icd9_per_pair.
       coalesce(1).
       write.
-      format("com.databricks.spark.csv").
-      option("header", "true").
-      save("s3://bd4h-mimic3/temp/icd9_per_pair.csv")
+      parquet("s3://bd4h-mimic3/temp/icd9_per_pair.parquet")
 
     // How many unique (admission, lab items) accompany each ICD-9
     // code present?  ('lab item' here refers to the entire
@@ -152,10 +177,22 @@ object Main {
     pairs_per_icd9.
       coalesce(1).
       write.
-      format("com.databricks.spark.csv").
-      option("header", "true").
-      save("s3://bd4h-mimic3/temp/pairs_per_icd9.csv")
+      parquet("s3://bd4h-mimic3/temp/pairs_per_icd9.parquet")
 
+    // How many unique (admission, lab items) accompany each ICD-9
+    // *category* present?
+    val pairs_per_icd9_category : DataFrame = labs_good_df.
+      join(diagnoses_icd, "HADM_ID").
+      groupBy("ICD9_CATEGORY").
+      count.
+      withColumnRenamed("count", "adm_and_lab_count").
+      sort(desc("adm_and_lab_count"))
+    pairs_per_icd9_category.cache()
+    pairs_per_icd9_category.
+      coalesce(1).
+      write.
+      parquet("s3://bd4h-mimic3/temp/pairs_per_icd9_category.parquet")
+    
     // Get the actual time-series for the selected admissions & lab
     // items:
     val lab_ts = labs_good_df.
@@ -163,9 +200,9 @@ object Main {
     lab_ts.
       coalesce(1).
       write.
-      format("com.databricks.spark.csv").
-      option("header", "true").
-      save("s3://bd4h-mimic3/temp/lab_timeseries.csv")
+      parquet("s3://bd4h-mimic3/temp/lab_timeseries.parquet")
+
+    /*
 
     // Get lab time-series for each: subject, admission, item
     // (i.e. which lab test), and unit (which should be identical
@@ -248,8 +285,8 @@ object Main {
       count.
       join(d_icd_diagnoses, "ICD9_CODE").
       sort(desc("count"))
-    
-    println("Hello, World")
+
+     */
   }
 
   /*
