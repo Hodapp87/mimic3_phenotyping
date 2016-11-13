@@ -1,28 +1,63 @@
 library(ggplot2)
 
-#Set the path for the R libraries you would like to use. 
-#You may need to modify this if you have custom R libraries. 
+# SparkR boilerplate
 .libPaths(c(.libPaths(), '/usr/lib/spark/R/lib'))  
-
-#Set the SPARK_HOME environment variable to the location on EMR
 Sys.setenv(SPARK_HOME = '/usr/lib/spark') 
-
-#Load the SparkR library into R
 library(SparkR, lib.loc = c(file.path(Sys.getenv("SPARK_HOME"), "R", "lib")))
-
-#Initiate a Spark context and identify where the master node is located.
-#local is used here because the RStudio server 
-#was installed on the master node
-
 sc <- sparkR.session(master = "local[*]", sparkEnvir = list(spark.driver.memory="2g"))
 # TODO: Can I make this use YARN instead?
-# sqlContext <- sparkRSQL.init(sc) 
 
-ts <- SparkR::read.parquet("s3://bd4h-mimic3/temp/labs_cohort_518_584.parquet")
-printSchema(ts)
+polynomial_time_warp <- function(ts, a = 3.0, b = 0.0) {
+  # Implement the polynomial time warping described in "Computational Phenotype 
+  # Discovery" by Lasko, Denny, & Levy (2013), equation 5.  This will also
+  # remove any offset that is present, that is, the resultant vector will start
+  # at 0.
+  # 
+  # Args:
+  #   ts: Time values in a vector.  Should be consecutive.
+  #   a: Optional value of coefficient 'a'; default is 3.0.
+  #   b: Optional value of coefficient 'b'; default is 0.0.
+  #
+  # Returns:
+  #   Warped version of 'ts' (a vector of the same length).
+  dw <- c(0, (diff(ts))**(1/a) + b)
+  # This finds the consecutive differences, warps them, and prepend a 0 so that
+  # the length of the cumulative sum comes out correct.
+  cumsum(dw)
+}
 
-ts_multi <- collect(filter(ts, (ts$SUBJECT_ID == 18944) | (ts$SUBJECT_ID == 68135) | (ts$SUBJECT_ID == 6466)))
-ggplot(ts_multi, aes(x=CHARTTIME_REL, y=VALUENUM, group = SUBJECT_ID)) +
+# Load data from Parquet:
+dataFile <- "s3://bd4h-mimic3/temp/labs_cohort_518_584.parquet"
+ts <- SparkR::read.parquet(dataFile)
+schema <- structType(structField("HADM_ID", "integer"),
+                     structField("ITEMID", "integer"),
+                     structField("SUBJECT_ID", "integer"),
+                     structField("RelChart", "double"),
+                     structField("RelChartWarped", "double"),
+                     structField("VALUENUM", "double"))
+ts_warped <- gapply(
+  ts,
+  c("HADM_ID", "ITEMID"),
+  function(key, x) {
+    x_sort <- x[order(x$CHARTTIME),]
+    y <- data.frame(HADM_ID = as.integer(key[[1]]),
+                    ITEMID = as.integer(key[[2]]),
+                    SUBJECT_ID = x[1,]$SUBJECT_ID,
+                    RelChart = x_sort$CHARTTIME - x_sort[1,]$CHARTTIME,
+                    RelChartWarped = polynomial_time_warp(x_sort$CHARTTIME),
+                    VALUENUM = x_sort$VALUENUM,
+                    stringsAsFactors = FALSE)
+  },
+  schema
+)
+cache(ts_warped)
+
+# printSchema(ts)
+
+
+
+ts_multi <- collect(filter(ts_warped, (ts_warped$SUBJECT_ID == 18944) | (ts_warped$SUBJECT_ID == 68135) | (ts_warped$SUBJECT_ID == 6466)))
+ggplot(ts_multi, aes(x=RelChartWarped, y=VALUENUM, group = SUBJECT_ID)) +
   xlab("Chart time") +
   ylab("Value") +
   geom_line(aes(colour = factor(SUBJECT_ID)))
