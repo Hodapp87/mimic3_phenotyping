@@ -92,6 +92,23 @@ sum_log_likelihood <- function(ts, sigma2, alpha, tau) {
 }
 # printSchema(ts)
 
+hyperparams <- expand.grid(
+  alpha = seq(0.05, 1, by = 0.05),
+  tau = seq(0.1, 5, by = 0.1),
+  sigma2 = seq(0.1, 2, by = 0.05)
+)
+hyperparams <- expand.grid(
+  alpha = seq(0.05, 1, by = 0.1),
+  tau = seq(0.1, 5, by = 0.2),
+  sigma2 = seq(0.1, 2, by = 0.2)
+)
+ll <- apply(hyperparams,
+            1,
+            function(x) {
+              #print(sprintf("sigma2=%f, alpha=%f, tau=%f", x["sigma2"], x["alpha"], x["tau"]))
+              sum_log_likelihood(ts_warped, x["sigma2"], x["alpha"], x["tau"])
+            })
+
 # Plot as a test:
 ts_multi <- collect(filter(ts_warped, (ts_warped$SUBJECT_ID == 18944) | (ts_warped$SUBJECT_ID == 68135) | (ts_warped$SUBJECT_ID == 6466)))
 ggplot(ts_multi, aes(x=RelChartWarped, y=VALUENUM, group = SUBJECT_ID)) +
