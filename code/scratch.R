@@ -26,7 +26,7 @@ polynomial_time_warp <- function(ts, a = 3.0, b = 0.0) {
   cumsum(dw)
 }
 
-covar_mtx <- function(X1, X2, sigma, alpha, tau) {
+covar_mtx <- function(X1, X2, sigma2, alpha, tau) {
   # Compute the covariance matrix from the covariance function of equation 3 of
   # the same paper, given input vectors X1 and X2.
   n1 <- length(X1)
@@ -37,7 +37,7 @@ covar_mtx <- function(X1, X2, sigma, alpha, tau) {
       k[i,j] <- X1[i] - X2[j]
     }
   }
-  k <- sigma*sigma*(1 + k^2 / (2*alpha*tau*tau))**-alpha
+  k <- sigma2*(1 + k^2 / (2*alpha*tau*tau))**-alpha
   k
 }
 
@@ -69,6 +69,27 @@ ts_warped <- gapply(
 # schema, basically.  It's sort of a pain to have to make it explicit.
 cache(ts_warped)
 
+sum_log_likelihood <- function(ts, sigma2, alpha, tau) {
+  series_log_lh <- gapplyCollect(
+    ts_warped,
+    c("HADM_ID", "ITEMID"),
+    function(key, s) {
+      X <- s$RelChartWarped
+      Y <- s$VALUENUM
+      K <- covar_mtx(X, X, sigma2, alpha, tau)
+      L <- chol(K + sigma2)
+      den <- solve(L, Y)
+      alph <- solve(t(L), den)
+      # Log likelihood:
+      ll <- (-1/2) %*% t(Y) %*% alph - sum(log(diag(L))) - (length(Y)/2) * log(2 * pi)
+      y <- data.frame(HADM_ID = as.integer(key[[1]]),
+                      ITEMID = as.integer(key[[2]]),
+                      SUBJECT_ID = s[1,]$SUBJECT_ID,
+                      LogLikelihood = ll)
+    }
+  )
+  sum(series_log_lh$LogLikelihood, na.rm = TRUE)
+}
 # printSchema(ts)
 
 # Plot as a test:
