@@ -26,6 +26,21 @@ polynomial_time_warp <- function(ts, a = 3.0, b = 0.0) {
   cumsum(dw)
 }
 
+covar_mtx <- function(X1, X2, sigma, alpha, tau) {
+  # Compute the covariance matrix from the covariance function of equation 3 of
+  # the same paper, given input vectors X1 and X2.
+  n1 <- length(X1)
+  n2 <- length(X2)
+  k <- matrix(rep(0, n1*n2), nrow=n1)
+  for (i in 1:n1) {
+    for (j in 1:n2) {
+      k[i,j] <- X1[i] - X2[j]
+    }
+  }
+  k <- sigma*sigma*(1 + k^2 / (2*alpha*tau*tau))**-alpha
+  k
+}
+
 # Load data from Parquet:
 dataFile <- "s3://bd4h-mimic3/temp/labs_cohort_518_584.parquet"
 ts <- SparkR::read.parquet(dataFile)
@@ -50,12 +65,13 @@ ts_warped <- gapply(
   },
   schema
 )
+# Is there a cleaner way of doing the above?  I'm having to duplicate the
+# schema, basically.  It's sort of a pain to have to make it explicit.
 cache(ts_warped)
 
 # printSchema(ts)
 
-
-
+# Plot as a test:
 ts_multi <- collect(filter(ts_warped, (ts_warped$SUBJECT_ID == 18944) | (ts_warped$SUBJECT_ID == 68135) | (ts_warped$SUBJECT_ID == 6466)))
 ggplot(ts_multi, aes(x=RelChartWarped, y=VALUENUM, group = SUBJECT_ID)) +
   xlab("Chart time") +
