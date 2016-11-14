@@ -3,7 +3,7 @@ package edu.gatech.cse8803.main
 import edu.gatech.cse8803.util.Utils
 import edu.gatech.cse8803.util.Schemas
 
-// import org.apache.spark.rdd.RDD
+import org.apache.spark.rdd.RDD
 import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
@@ -12,11 +12,12 @@ import java.sql.Timestamp
 // import com.cloudera.sparkts._
 
 case class PatientEventSeries(
-  subject_id: Int,
   adm_id: Int,
   item_id: Int,
   unit: String,
-  series: Seq[(java.sql.Timestamp, String)]
+  // series & warpedSeries: (time in days, value)
+  series: Iterable[(Double, String)],
+  warpedSeries: Iterable[(Double, String)]
 )
 
 case class LabItem(
@@ -104,7 +105,8 @@ object Main {
 
     /*
     val diag_cohort = spark.read.parquet(f"${tmp_data_dir}/diag_cohort_${icd_code1}_${icd_code2}")
-    val labs_cohort = spark.read.parquet(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.parquet")
+    // No longer valid:
+    // val labs_cohort = spark.read.parquet(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.parquet")
      */
   
     // Get those admissions which had >= 1 diagnosis of icd_code1, or
@@ -122,25 +124,55 @@ object Main {
 
     // Get the lab events which meet 'lab_min_series', which are from
     // an admission in the cohort, and which are of the desired test.
-    val labs_cohort1 : DataFrame = labs_length_ok.
+    val labs_cohort_df : DataFrame = labs_length_ok.
       join(labevents, Seq("HADM_ID", "ITEMID")).
       filter($"ITEMID" === item_test).
       join(diag_cohort, Seq("HADM_ID"))
-    //labs_cohort.persist(StorageLevel.MEMORY_AND_DISK)
 
+    // Produce time-series, and warped time-series, for all admissions
+    // in the cohort (for just the selected lab items):
+    val labs_cohort : RDD[PatientEventSeries] = labs_cohort_df.rdd.
+      map { row =>
+        val k = (row.getAs[Int]("HADM_ID"),
+          row.getAs[Int]("ITEMID"),
+          row.getAs[String]("VALUEUOM"))
+        val v = (row.getAs[Timestamp]("CHARTTIME").getTime / 86400000.0,
+          row.getAs[String]("VALUE"))
+        (k, v)
+      }.groupByKey.map { case ((adm, item, uom), series_raw) =>
+          // Separate out times and values, and pass forward both
+          // "original" time series and warped time series:
+          val series = series_raw.toSeq.sortBy(_._1)
+          val (times, values) = series.unzip
+          val start = times.min
+          val relTimes = times.map(_ - start)
+          val warpedTimes = Utils.polynomialTimeWarp(relTimes.toSeq)
+          //val warpedTimes = relTimes
+          PatientEventSeries(
+            adm,
+            item,
+            uom,
+            relTimes.zip(values),
+            warpedTimes.zip(values)
+          )
+      }
+    labs_cohort.persist(StorageLevel.MEMORY_AND_DISK)
+
+    /*
     // Get the minimum chart time into CHART_START for each admission
     // & item:
-    val labs_chart_start : DataFrame = labs_cohort1.
+    val labs_chart_start : DataFrame = labs_cohort.
       groupBy("HADM_ID", "ITEMID").
       agg(min($"CHARTTIME")).
       withColumnRenamed("min(CHARTTIME)", "CHART_START")
 
     // Set CHARTTIME_REL to the 'relative' chart time:
-    val labs_cohort : DataFrame = labs_cohort1.
+    /*val labs_cohort : DataFrame = labs_cohort1.
       join(labs_chart_start, Seq("HADM_ID", "ITEMID")).
-      withColumn("CHARTTIME_REL", datediff($"CHARTTIME", $"CHART_START"))
+      withColumn("CHARTTIME_REL", datediff($"CHARTTIME", $"CHART_START"))*/
 
     labs_cohort.write.parquet(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.parquet")
+     */
 
     /***********************************************************************
      * Exploratory stuff
