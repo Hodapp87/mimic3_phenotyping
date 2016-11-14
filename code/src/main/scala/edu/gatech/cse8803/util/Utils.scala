@@ -30,6 +30,32 @@ object Utils {
     df
   }
 
+  def polynomialTimeWarp(
+    ts : Seq[Double], a : Double = 3.0, b : Double = 0.0) :
+      Seq[Double] =
+  {
+    /**
+      * Implement the polynomial time warping described in
+      * "Computational Phenotype Discovery" by Lasko, Denny, & Levy
+      * (2013), equation 5.  This will also remove any offset that is
+      * present, that is, the resultant vector will start at 0.
+      * 
+      * Args:
+      *  ts: Time values, which should already be sorted.
+      *  a: Optional value of coefficient 'a'; default is 3.0.
+      *  b: Optional value of coefficient 'b'; default is 0.0.
+      * 
+      * Returns:
+      *  Warped version of 'ts' (a sequence of the same length).
+      */
+
+    val diffs = ts.zip(ts.drop(1)).map { case (x,y) =>
+      // Find successive differences, then also warp them:
+      Math.pow(y - x, 1/a) + b
+    }
+    diffs.foldLeft(Seq(0.0))((l,d) => (d + l(0)) +: l).reverse
+  }
+
   /** Pretty-print a dataframe for Zeppelin.  Either supply
    * a number of rows to take, or 'None' to take all of them.
    */
