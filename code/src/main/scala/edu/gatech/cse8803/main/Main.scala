@@ -30,7 +30,7 @@ case class LabItem(
 
 // This is for lab_ts, which inexplicably has a NullPointerException
 // if I instead use a 4-tuple of identical fields.
-case class LabWrapper(a1 : Int, a2 : Int, a3 : Int, a4 : String)
+// case class LabWrapper(a1 : Int, a2 : Int, a3 : Int, a4 : String)
 
 object Main {
   def main(args: Array[String]) {
@@ -120,7 +120,7 @@ object Main {
       withColumnRenamed("sum(is_code2)", "num_code2").
       filter(($"num_code1" > 0) =!= ($"num_code2" > 0))
     diag_cohort.cache()
-    diag_cohort.write.parquet(f"${tmp_data_dir}/diag_cohort_${icd_code1}_${icd_code2}")
+    // diag_cohort.write.parquet(f"${tmp_data_dir}/diag_cohort_${icd_code1}_${icd_code2}")
 
     // Get the lab events which meet 'lab_min_series', which are from
     // an admission in the cohort, and which are of the desired test.
@@ -157,6 +157,24 @@ object Main {
           )
       }
     labs_cohort.persist(StorageLevel.MEMORY_AND_DISK)
+
+    // Flatten out to load elsewhere:
+    val labs_cohort_flat : DataFrame =
+      labs_cohort.flatMap { p: PatientEventSeries =>
+        val ts = p.series.zip(p.warpedSeries)
+        ts.map { case ((t, _), (tw, value)) =>
+          (p.adm_id, p.item_id, p.unit, t, tw, value) 
+        }
+      }.toDF("HADM_ID", "ITEMID", "VALUEUOM", "CHARTTIME", "CHARTTIME_warped", "VALUE")
+    labs_cohort_flat.
+      coalesce(1).
+      write.parquet(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.parquet")
+    labs_cohort_flat.
+      coalesce(1).
+      write.
+      format("com.databricks.spark.csv").
+      option("header", "true").
+      save(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.csv")
 
     /*
     // Get the minimum chart time into CHART_START for each admission
