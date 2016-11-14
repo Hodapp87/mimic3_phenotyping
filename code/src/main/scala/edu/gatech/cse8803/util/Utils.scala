@@ -5,29 +5,27 @@ import org.apache.spark.sql.types._
 
 object Utils {
   /**
-   * Factor out this common functionality into a function:  Look in s3_dir
-   * (where I've placed the MIMIC-III data) for a .csv.gz file with the given
-   * name.  Return the dataframe for that CSV, and also create a temp table
-   * with the same base name.  In the process, this prints out the schema used
-   * (for the sake of easier loading later)
+   * Load the given CSV file, returning the dataframe for that CSV.
+   * In the process, this prints out the schema inferred (for the sake
+   * of easier loading later) if one is not supplied.
    */
-  def csv_from_s3(spark : SparkSession, base : String, schema : Option[StructType] = None) : DataFrame = {
-    val s3_dir = "s3://bd4h-mimic3/"
+  def csv_from_s3(spark : SparkSession, fname : String, schema : Option[StructType] = None) : DataFrame = {
     val schema_fn = (f : DataFrameReader) =>
     if (schema.isDefined) f.schema(schema.get) else f
+
     val df = schema_fn(spark.
       read.
       format("com.databricks.spark.csv").
       option("header", "true").
       option("mode", "DROPMALFORMED")).
-      load(f"${s3_dir}${base}.csv.gz")
+      load(fname)
     
     if (!schema.isDefined) {
       println("Inferred schema:")
       print(df.schema)
     }
     
-    df.createOrReplaceTempView(base)
+    // df.createOrReplaceTempView(base)
     
     df
   }

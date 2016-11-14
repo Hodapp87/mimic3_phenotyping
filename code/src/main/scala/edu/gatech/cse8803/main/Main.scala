@@ -36,6 +36,12 @@ object Main {
     val spark = Utils.createContext
     import spark.implicits._
 
+    // Input data directories
+    //val tmp_data_dir : String = "s3://bd4h-mimic3/temp/"
+    //val mimic3_dir : String = "s3://bd4h-mimic3/"
+    val tmp_data_dir : String = "file:///home/hodapp/source/bd4h-project/data-temp/"
+    val mimic3_dir : String = "file:////mnt/dev/mimic3/"
+
     import org.apache.log4j.Logger
     import org.apache.log4j.Level
 
@@ -44,11 +50,11 @@ object Main {
 
     // These are small enough to cache:
     val d_icd_diagnoses = Utils.csv_from_s3(
-      spark, "D_ICD_DIAGNOSES", Some(Schemas.d_icd_diagnoses))
+      spark, f"${mimic3_dir}/D_ICD_DIAGNOSES.csv.gz", Some(Schemas.d_icd_diagnoses))
     d_icd_diagnoses.cache()
 
     val d_labitems = Utils.csv_from_s3(
-      spark, "D_LABITEMS", Some(Schemas.d_labitems))
+      spark, f"${mimic3_dir}/D_LABITEMS.csv.gz", Some(Schemas.d_labitems))
     // D_LABITEMS is fairly small, so make a map of it:
     val labitemMap : Map[Int,LabItem] = d_labitems.
       rdd.map { r: Row =>
@@ -61,18 +67,18 @@ object Main {
       read.
       format("com.databricks.spark.csv").
       option("header", "true").
-      load("s3://bd4h-mimic3/LOINC_2.56_Text/loinc.csv")
+      load(f"${mimic3_dir}/LOINC_2.56_Text/loinc.csv")
     //loinc.createOrReplaceTempView("loinc")
     //loinc.cache()
 
     val patients = Utils.csv_from_s3(
-      spark, "PATIENTS", Some(Schemas.patients))
+      spark, f"${mimic3_dir}/PATIENTS.csv.gz", Some(Schemas.patients))
     val labevents = Utils.csv_from_s3(
-      spark, "LABEVENTS", Some(Schemas.labevents))
+      spark, f"${mimic3_dir}/LABEVENTS.csv.gz", Some(Schemas.labevents))
     // For DIAGNOSES_ICD, also get the ICD9 category (which we reuse
     // in various places):
     val diagnoses_icd = Utils.csv_from_s3(
-      spark, "DIAGNOSES_ICD", Some(Schemas.diagnoses)).
+      spark, f"${mimic3_dir}/DIAGNOSES_ICD.csv.gz", Some(Schemas.diagnoses)).
       withColumn("ICD9_CATEGORY", $"ICD9_CODE".substr(0, 3))
 
     // What is the minimum length (number of samples/events) in a
@@ -84,6 +90,9 @@ object Main {
     val icd_code1 = "518"
     val icd_code2 = "584"
 
+    // ITEMID of the test we're interested in:
+    val item_test = 50820
+
     // Get (HADM_ID, ITEM_ID) for those admissions and lab items which
     // meet 'lab_min_series':
     val labs_length_ok : DataFrame = labevents.
@@ -93,6 +102,11 @@ object Main {
       filter($"count" >= lab_min_series).
       select("HADM_ID", "ITEMID")
 
+    /*
+    val diag_cohort = spark.read.parquet(f"${tmp_data_dir}/diag_cohort_${icd_code1}_${icd_code2}")
+    val labs_cohort = spark.read.parquet(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.parquet")
+     */
+  
     // Get those admissions which had >= 1 diagnosis of icd_code1, or
     // of icd_code2, but not diagnoses of both.
     val diag_cohort : DataFrame = diagnoses_icd.
@@ -100,7 +114,33 @@ object Main {
       withColumn("is_code2", ($"ICD9_CATEGORY" === icd_code2).cast(IntegerType)).
       groupBy("HADM_ID").
       sum("is_code1", "is_code2").
-      filter(($"sum(is_code1)" > 0) =!= ($"sum(is_code2)" > 0))
+      withColumnRenamed("sum(is_code1)", "num_code1").
+      withColumnRenamed("sum(is_code2)", "num_code2").
+      filter(($"num_code1" > 0) =!= ($"num_code2" > 0))
+    diag_cohort.cache()
+    diag_cohort.write.parquet(f"${tmp_data_dir}/diag_cohort_${icd_code1}_${icd_code2}")
+
+    // Get the lab events which meet 'lab_min_series', which are from
+    // an admission in the cohort, and which are of the desired test.
+    val labs_cohort1 : DataFrame = labs_length_ok.
+      join(labevents, Seq("HADM_ID", "ITEMID")).
+      filter($"ITEMID" === item_test).
+      join(diag_cohort, Seq("HADM_ID"))
+    //labs_cohort.persist(StorageLevel.MEMORY_AND_DISK)
+
+    // Get the minimum chart time into CHART_START for each admission
+    // & item:
+    val labs_chart_start : DataFrame = labs_cohort1.
+      groupBy("HADM_ID", "ITEMID").
+      agg(min($"CHARTTIME")).
+      withColumnRenamed("min(CHARTTIME)", "CHART_START")
+
+    // Set CHARTTIME_REL to the 'relative' chart time:
+    val labs_cohort : DataFrame = labs_cohort1.
+      join(labs_chart_start, Seq("HADM_ID", "ITEMID")).
+      withColumn("CHARTTIME_REL", datediff($"CHARTTIME", $"CHART_START"))
+
+    labs_cohort.write.parquet(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.parquet")
 
     /***********************************************************************
      * Exploratory stuff
@@ -108,12 +148,12 @@ object Main {
 
     // To bypass:
     /*
-    val labs_patients_ok = spark.read.parquet("s3://bd4h-mimic3/temp/labs.parquet")
-    val labs_good_df = spark.read.parquet("s3://bd4h-mimic3/temp/labs_and_admissions.parquet")
-    val icd9_per_pair = spark.read.parquet("s3://bd4h-mimic3/temp/icd9_per_pair.parquet")
-    val pairs_per_icd9 = spark.read.parquet("s3://bd4h-mimic3/temp/pairs_per_icd9.parquet")
-    val pairs_per_icd9_category = spark.read.parquet("s3://bd4h-mimic3/temp/pairs_per_icd9_category.parquet")
-    val lab_ts = spark.read.parquet("s3://bd4h-mimic3/temp/lab_timeseries.parquet")
+    val labs_patients_ok = spark.read.parquet(f"${tmp_data_dir}/labs.parquet")
+    val labs_good_df = spark.read.parquet(f"${tmp_data_dir}/labs_and_admissions.parquet")
+    val icd9_per_pair = spark.read.parquet(f"${tmp_data_dir}/icd9_per_pair.parquet")
+    val pairs_per_icd9 = spark.read.parquet(f"${tmp_data_dir}/pairs_per_icd9.parquet")
+    val pairs_per_icd9_category = spark.read.parquet(f"${tmp_data_dir}/pairs_per_icd9_category.parquet")
+    val lab_ts = spark.read.parquet(f"${tmp_data_dir}/lab_timeseries.parquet")
      */
 
     // Get ITEM_ID for those lab items which meet both
@@ -143,12 +183,12 @@ object Main {
       sort(desc("count")).
       coalesce(1).
       write.
-      parquet("s3://bd4h-mimic3/temp/labs.parquet")
+      parquet(f"${tmp_data_dir}/labs.parquet")
     // and then both labs & admissions:
     labs_good_df.
       coalesce(1).
       write.
-      parquet("s3://bd4h-mimic3/temp/labs_and_admissions.parquet")
+      parquet(f"${tmp_data_dir}/labs_and_admissions.parquet")
 
     // How many unique ICD-9 diagnoses accompany each admission & lab
     // item?
@@ -160,7 +200,7 @@ object Main {
     icd9_per_pair.
       coalesce(1).
       write.
-      parquet("s3://bd4h-mimic3/temp/icd9_per_pair.parquet")
+      parquet(f"${tmp_data_dir}/icd9_per_pair.parquet")
 
     // How many unique (admission, lab items) accompany each ICD-9
     // code present?  ('lab item' here refers to the entire
@@ -177,7 +217,7 @@ object Main {
     pairs_per_icd9.
       coalesce(1).
       write.
-      parquet("s3://bd4h-mimic3/temp/pairs_per_icd9.parquet")
+      parquet(f"${tmp_data_dir}/pairs_per_icd9.parquet")
 
     // How many unique (admission, lab items) accompany each ICD-9
     // *category* present?
@@ -191,7 +231,7 @@ object Main {
     pairs_per_icd9_category.
       coalesce(1).
       write.
-      parquet("s3://bd4h-mimic3/temp/pairs_per_icd9_category.parquet")
+      parquet(f"${tmp_data_dir}/pairs_per_icd9_category.parquet")
     
     // Get the actual time-series for the selected admissions & lab
     // items:
@@ -200,7 +240,7 @@ object Main {
     lab_ts.
       coalesce(1).
       write.
-      parquet("s3://bd4h-mimic3/temp/lab_timeseries.parquet")
+      parquet(f"${tmp_data_dir}/lab_timeseries.parquet")
 
     /*
 
