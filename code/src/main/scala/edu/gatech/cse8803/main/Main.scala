@@ -2,6 +2,7 @@ package edu.gatech.cse8803.main
 
 import edu.gatech.cse8803.util.Utils
 import edu.gatech.cse8803.util.Schemas
+import edu.gatech.cse8803.types._
 
 import org.apache.spark.ml.param._
 import org.apache.spark.ml.tuning._
@@ -14,16 +15,23 @@ import java.sql.Timestamp
 // import com.cloudera.sparkts._
 
 object Main {
-  def main(args: Array[String]) : Unit = {
-    val spark = Utils.createContext// ("yarn-client")
+  def main(args: Array[String]): Unit = {
+    val spark = SparkSession.builder.
+      // Can I just pass this in with spark-submit?
+      //master("yarn").
+      master("local[*]").
+      appName("CSE-8803 project").
+      getOrCreate()
     val sc = spark.sparkContext
     import spark.implicits._
 
     // Input data directories
-    //val tmp_data_dir : String = "s3://bd4h-mimic3/cohort_518_584_50820/"
-    //val mimic3_dir : String = "s3://bd4h-mimic3/"
-    val tmp_data_dir : String = "file:///home/hodapp/source/bd4h-project/data-temp/"
-    val mimic3_dir : String = "file:////mnt/dev/mimic3/"
+    val tmp_data_dir : String = "s3://bd4h-mimic3/cohort_518_584_50820/"
+    val mimic3_dir : String = "s3://bd4h-mimic3/"
+    //val tmp_data_dir : String = "file:///home/hodapp/source/bd4h-project/data-temp/"
+    //val mimic3_dir : String = "file:////mnt/dev/mimic3/"
+
+    // TODO: Perhaps pass the above in as commandline options
 
     import org.apache.log4j.Logger
     import org.apache.log4j.Level
@@ -39,9 +47,9 @@ object Main {
     val d_labitems = Utils.csv_from_s3(
       spark, f"${mimic3_dir}/D_LABITEMS.csv.gz", Some(Schemas.d_labitems))
     // D_LABITEMS is fairly small, so make a map of it:
-    val labitemMap : Map[Int, Schemas.LabItem] = d_labitems.
+    val labitemMap : Map[Int, LabItem] = d_labitems.
       rdd.map { r: Row =>
-        val li = Schemas.LabItem(r.getAs("ITEMID"), r.getAs("LABEL"),
+        val li = LabItem(r.getAs("ITEMID"), r.getAs("LABEL"),
           r.getAs("FLUID"), r.getAs("CATEGORY"), r.getAs("LOINC_CODE"))
         (li.item_id, li)
       }.collect.toMap
@@ -115,7 +123,7 @@ object Main {
 
     // Produce time-series, and warped time-series, for all admissions
     // in the cohort (for just the selected lab items):
-    val labs_cohort : RDD[Schemas.PatientEventSeries] = labs_cohort_df.rdd.
+    val labs_cohort : RDD[PatientEventSeries] = labs_cohort_df.rdd.
       map { row =>
         val k = (row.getAs[Int]("HADM_ID"),
           row.getAs[Int]("ITEMID"),
@@ -134,7 +142,7 @@ object Main {
           val relTimes = times.map(_ - start)
           val warpedTimes = Utils.polynomialTimeWarp(relTimes.toSeq)
           //val warpedTimes = relTimes
-          Schemas.PatientEventSeries(
+          PatientEventSeries(
             adm,
             item,
             subj,
@@ -150,7 +158,7 @@ object Main {
 
     // Flatten out to load elsewhere:
     val labs_cohort_flat : DataFrame =
-      labs_cohort.flatMap { p: Schemas.PatientEventSeries =>
+      labs_cohort.flatMap { p: PatientEventSeries =>
         val ts = p.series.zip(p.warpedSeries)
         ts.map { case ((t, _), (tw, value)) =>
           (p.adm_id, p.item_id, p.subject_id, p.unit, t, tw, value) 
@@ -213,7 +221,7 @@ object Main {
     val tau = 3.25
     val labs_cohort_split = labs_cohort.randomSplit(Array(0.7, 0.3), 0x12345)
     val labs_cohort_train = labs_cohort_split(0)
-    val gprModels = labs_cohort_train.map { p: Schemas.PatientEventSeries =>
+    val gprModels = labs_cohort_train.map { p: PatientEventSeries =>
       // Train a model for every time-series in training set:
       val t@(ll, matL, matA) = Utils.gprTrain(p.warpedSeries, sigma2, alpha, tau)
 

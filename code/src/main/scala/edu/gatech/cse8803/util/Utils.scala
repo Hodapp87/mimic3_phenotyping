@@ -130,7 +130,7 @@ case object Utils {
       * time value in 'xTest'.
       */
 
-    // Compute k*, covariance between test points & training points:
+    // Compute k*, covariance between training points & test points:
     val ks = rationalQuadraticCovar(xTrain, xTest, sigma2, alpha, tau)
     // Compute f*:
     val fs = ks.t * A
@@ -160,21 +160,5 @@ case object Utils {
     val zeppelin_pfx = " "
     println(f"${zeppelin_pfx}${hdr}\n${table}")
   }
-
-  def getSession() = {
-  }
-
-  def createContext(appName: String, masterUrl: String): SparkSession = {
-    SparkSession.builder.
-      master(masterUrl)
-      .appName(appName)
-      .getOrCreate()
-  }
-
-  def createContext(appName: String): SparkSession =
-    createContext(appName, "local[*]")
-
-  def createContext: SparkSession =
-    createContext("CSE-8803 project", "local[*]")
-  
+ 
 }
