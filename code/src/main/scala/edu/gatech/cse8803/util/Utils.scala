@@ -131,19 +131,21 @@ case object Utils {
       */
 
     // Compute k*, covariance between test points & training points:
-    val ks = rationalQuadraticCovar(xTest, xTrain, sigma2, alpha, tau)
+    val ks = rationalQuadraticCovar(xTrain, xTest, sigma2, alpha, tau)
     // Compute f*:
     val fs = ks.t * A
     // Compute v:
     val v = L \ ks
-    val variance = rationalQuadraticCovar(xTest, xTest, sigma2, alpha, tau) - v.t * v
+    val covar = rationalQuadraticCovar(xTest, xTest, sigma2, alpha, tau) - v.t * v
 
-    // variance is a square matrix, so flattening it isn't really
-    // meaningful here.  Do I need just the covariance function for
-    // each point in xTest - not the covariance of the whole matrix?
+    // I don't know that I actually need to compute the *entire*
+    // covariance matrix.  I only need its diagonals for the
+    // covariance of every xTest with itself.  Also, this computation
+    // may not even be correct outside of the diagonal.
 
-    // Placeholder for variance:
-    fs.valuesIterator.zip(fs.valuesIterator).toList
+    val means = fs.valuesIterator
+    val variances = diag(covar).valuesIterator
+    means.zip(variances).toList
   }
 
   /** Pretty-print a dataframe for Zeppelin.  Either supply

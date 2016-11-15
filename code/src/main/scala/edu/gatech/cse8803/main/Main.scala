@@ -14,16 +14,16 @@ import java.sql.Timestamp
 // import com.cloudera.sparkts._
 
 object Main {
-  def main(args: Array[String]) {
-    val spark = Utils.createContext
+  def main(args: Array[String]) : Unit = {
+    val spark = Utils.createContext// ("yarn-client")
     val sc = spark.sparkContext
     import spark.implicits._
 
     // Input data directories
-    val tmp_data_dir : String = "s3://bd4h-mimic3/cohort_518_584_50820/"
-    val mimic3_dir : String = "s3://bd4h-mimic3/"
-    //val tmp_data_dir : String = "file:///home/hodapp/source/bd4h-project/data-temp/"
-    //val mimic3_dir : String = "file:////mnt/dev/mimic3/"
+    //val tmp_data_dir : String = "s3://bd4h-mimic3/cohort_518_584_50820/"
+    //val mimic3_dir : String = "s3://bd4h-mimic3/"
+    val tmp_data_dir : String = "file:///home/hodapp/source/bd4h-project/data-temp/"
+    val mimic3_dir : String = "file:////mnt/dev/mimic3/"
 
     import org.apache.log4j.Logger
     import org.apache.log4j.Level
@@ -166,9 +166,7 @@ object Main {
       option("header", "true").
       save(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.csv")
 
-    // Log-likelihood example:
-    // val labs_ll = Utils.sumLogLikelihood(labs_cohort, 1.5, 0.16, 2.43).sum
-
+    // Hyperparameter optimization:
     val sigma2Param = new DoubleParam("", "sigma2", "")
     val alphaParam = new DoubleParam("", "alpha", "")
     val tauParam = new DoubleParam("", "tau", "")
@@ -208,6 +206,20 @@ object Main {
       // Fucking Spark, would it kill you to provide an argmax/argmin
       // function?
     }
+
+    // Regression example:
+    val sigma2 = 1.5
+    val alpha = 0.125
+    val tau = 3.25
+    val labs_cohort_split = labs_cohort.randomSplit(Array(0.7, 0.3), 0x12345)
+    val labs_cohort_train = labs_cohort_split(0)
+    val gprModels = labs_cohort_train.map { p: Schemas.PatientEventSeries =>
+      // Train a model for every time-series in training set:
+      val t@(ll, matL, matA) = Utils.gprTrain(p.warpedSeries, sigma2, alpha, tau)
+
+      t
+    }
+   
 
     if (false) {
 
