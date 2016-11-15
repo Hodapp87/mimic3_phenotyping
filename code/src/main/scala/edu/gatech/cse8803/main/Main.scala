@@ -66,7 +66,7 @@ object Main {
 
     // What is the minimum length (number of samples/events) in a
     // time-series that we'll consider for a given admission & item?
-    val lab_min_series = 50
+    val lab_min_series = 3
     val lab_min_patients = 30
 
     // Two ICD codes; we want one or the other, but not both.
@@ -85,8 +85,11 @@ object Main {
       filter($"count" >= lab_min_series).
       select("HADM_ID", "ITEMID")
 
+    // To bypass:
     /*
-    val diag_cohort = spark.read.parquet(f"${tmp_data_dir}/diag_cohort_${icd_code1}_${icd_code2}")
+    val diag_cohort = spark.read.parquet(f"${tmp_data_dir}/diag_cohort_${icd_code1}_${icd_code2}.parquet")
+    val labs_cohort : RDD[Schemas.PatientEventSeries] = sc.
+      objectFile(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}_rdd")
     val labs_cohort_flat = spark.read.parquet(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.parquet")
      */
   
@@ -101,7 +104,7 @@ object Main {
       withColumnRenamed("sum(is_code2)", "num_code2").
       filter(($"num_code1" > 0) =!= ($"num_code2" > 0))
     diag_cohort.cache()
-    // diag_cohort.write.parquet(f"${tmp_data_dir}/diag_cohort_${icd_code1}_${icd_code2}")
+    diag_cohort.write.parquet(f"${tmp_data_dir}/diag_cohort_${icd_code1}_${icd_code2}.parquet")
 
     // Get the lab events which meet 'lab_min_series', which are from
     // an admission in the cohort, and which are of the desired test.
@@ -141,6 +144,9 @@ object Main {
           )
       }
     labs_cohort.persist(StorageLevel.MEMORY_AND_DISK)
+    labs_cohort.
+      coalesce(1).
+      saveAsObjectFile(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}_rdd")    // Yes, this coalesce(1) is bad practice.
 
     // Flatten out to load elsewhere:
     val labs_cohort_flat : DataFrame =
@@ -169,125 +175,132 @@ object Main {
 
     val paramGrid = new ParamGridBuilder().
       addGrid(sigma2Param, 0.1 to 2.0 by 0.1).
-      addGrid(alphaParam, 0.1 to 1.0 by 0.025).
-      addGrid(tauParam, 0.1 to 4.0 by 0.05).
+      addGrid(alphaParam, 0.05 to 0.5 by 0.05).
+      addGrid(tauParam, 1.5 to 4.0 by 0.05).
       build.
       map { pm =>
-        (pm.getOrElse(sigma2Param, 0.0),
-          pm.getOrElse(alphaParam, 0.0),
-          pm.getOrElse(tauParam, 0.0))
+        (pm.get(sigma2Param).get,
+          pm.get(alphaParam).get,
+          pm.get(tauParam).get)
+        // The .get is intentional; it *should* throw an exception if
+        // it can't find the parameter this early.
       }
 
     val paramRdd : RDD[(Double, Double, Double)] = sc.parallelize(paramGrid)
 
-    val labs_ll : RDD[((Double, Double, Double), Double)] = paramRdd.
-      cartesian(labs_cohort).
-      map { case (t@(sigma2, alpha, tau), series) =>
-        (t, Utils.logLikelihood(series.warpedSeries, sigma2, alpha, tau))
-      }.foldByKey(0.0)(_ + _)
-    labs_ll.cache()
+    // TODO: Run this tonight
+    if (false) {
+      val labs_ll : RDD[((Double, Double, Double), Double)] = paramRdd.
+        cartesian(labs_cohort).
+        map { case (t@(sigma2, alpha, tau), series) =>
+          (t, Utils.logLikelihood(series.warpedSeries, sigma2, alpha, tau))
+        }.foldByKey(0.0)(_ + _)
+      labs_ll.cache()
 
-    // optimal: ((Double, Double, Double), Double) =
-    // ((1.5000000000000002,0.125,3.2499999999999964),-109216.21495499206)
-    val optimal = labs_ll.
-      aggregate((0.0, 0.0, 0.0), Double.NegativeInfinity)(
-        { case(_, t) => t },
-        { (t1,t2) => if (t1._2 > t2._2) t1 else t2 }
-      )
-    // Fucking Spark, would it kill you to provide an argmax/argmin
-    // function?
+      // optimal: ((Double, Double, Double), Double) =
+      // ((1.5000000000000002,0.125,3.2499999999999964),-109216.21495499206)
+      val optimal = labs_ll.
+        aggregate((0.0, 0.0, 0.0), Double.NegativeInfinity)(
+          { case(_, t) => t },
+          { (t1,t2) => if (t1._2 > t2._2) t1 else t2 }
+        )
+      // Fucking Spark, would it kill you to provide an argmax/argmin
+      // function?
+    }
 
-    /***********************************************************************
-     * Exploratory stuff
-     ***********************************************************************/
+    if (false) {
 
-    // To bypass:
-    /*
-    val labs_patients_ok = spark.read.parquet(f"${tmp_data_dir}/labs.parquet")
-    val labs_good_df = spark.read.parquet(f"${tmp_data_dir}/labs_and_admissions.parquet")
-    val icd9_per_pair = spark.read.parquet(f"${tmp_data_dir}/icd9_per_pair.parquet")
-    val pairs_per_icd9 = spark.read.parquet(f"${tmp_data_dir}/pairs_per_icd9.parquet")
-    val pairs_per_icd9_category = spark.read.parquet(f"${tmp_data_dir}/pairs_per_icd9_category.parquet")
-    val lab_ts = spark.read.parquet(f"${tmp_data_dir}/lab_timeseries.parquet")
-     */
+      /***********************************************************************
+       * Exploratory stuff
+       ***********************************************************************/
 
-    // Get ITEM_ID for those lab items which meet both
-    // 'lab_min_series' and 'lab_min_patients'.
-    val labs_patients_ok : DataFrame = labs_length_ok.
-      groupBy("ITEMID").
-      // How many times does this item occur, given that we're
-      // concerned only with length >= lab_min_series?
-      count.
-      filter($"count" >= lab_min_patients)
+      // To bypass:
+      /*
+       val labs_patients_ok = spark.read.parquet(f"${tmp_data_dir}/labs.parquet")
+       val labs_good_df = spark.read.parquet(f"${tmp_data_dir}/labs_and_admissions.parquet")
+       val icd9_per_pair = spark.read.parquet(f"${tmp_data_dir}/icd9_per_pair.parquet")
+       val pairs_per_icd9 = spark.read.parquet(f"${tmp_data_dir}/pairs_per_icd9.parquet")
+       val pairs_per_icd9_category = spark.read.parquet(f"${tmp_data_dir}/pairs_per_icd9_category.parquet")
+       val lab_ts = spark.read.parquet(f"${tmp_data_dir}/lab_timeseries.parquet")
+       */
+      
+      // Get ITEM_ID for those lab items which meet both
+      // 'lab_min_series' and 'lab_min_patients'.
+      val labs_patients_ok : DataFrame = labs_length_ok.
+        groupBy("ITEMID").
+        // How many times does this item occur, given that we're
+        // concerned only with length >= lab_min_series?
+        count.
+        filter($"count" >= lab_min_patients)
 
-    // Finally, get all (HADM_ID, ITEM_ID) that satisfy both:
-    val labs_good_df : DataFrame = labs_patients_ok.
-      join(labs_length_ok, "ITEMID").
-      // join is supposed to be an inner join, but whatever...
-      filter(not(isnull($"HADM_ID"))).
-      select("HADM_ID", "ITEMID")
+      // Finally, get all (HADM_ID, ITEM_ID) that satisfy both:
+      val labs_good_df : DataFrame = labs_patients_ok.
+        join(labs_length_ok, "ITEMID").
+        // join is supposed to be an inner join, but whatever...
+        filter(not(isnull($"HADM_ID"))).
+        select("HADM_ID", "ITEMID")
 
-    labs_patients_ok.cache()
-    labs_good_df.cache()
+      labs_patients_ok.cache()
+      labs_good_df.cache()
 
-    // For 'nice' output of just which lab items are relevant (and the
-    // human-readable form):
-    labs_patients_ok.
-      dropDuplicates("ITEMID").
-      join(d_labitems, "ITEMID").
-      sort(desc("count")).
-      coalesce(1).
-      write.
-      parquet(f"${tmp_data_dir}/labs.parquet")
-    // and then both labs & admissions:
-    labs_good_df.
-      coalesce(1).
-      write.
-      parquet(f"${tmp_data_dir}/labs_and_admissions.parquet")
+      // For 'nice' output of just which lab items are relevant (and the
+      // human-readable form):
+      labs_patients_ok.
+        dropDuplicates("ITEMID").
+        join(d_labitems, "ITEMID").
+        sort(desc("count")).
+        coalesce(1).
+        write.
+        parquet(f"${tmp_data_dir}/labs.parquet")
+      // and then both labs & admissions:
+      labs_good_df.
+        coalesce(1).
+        write.
+        parquet(f"${tmp_data_dir}/labs_and_admissions.parquet")
 
-    // How many unique ICD-9 diagnoses accompany each admission & lab
-    // item?
-    val icd9_per_pair : DataFrame = labs_good_df.
-      join(diagnoses_icd, "HADM_ID").
-      groupBy("HADM_ID", "ITEMID").
-      count.
-      withColumnRenamed("count", "icd9_unique_count")
-    icd9_per_pair.
-      coalesce(1).
-      write.
-      parquet(f"${tmp_data_dir}/icd9_per_pair.parquet")
+      // How many unique ICD-9 diagnoses accompany each admission & lab
+      // item?
+      val icd9_per_pair : DataFrame = labs_good_df.
+        join(diagnoses_icd, "HADM_ID").
+        groupBy("HADM_ID", "ITEMID").
+        count.
+        withColumnRenamed("count", "icd9_unique_count")
+      icd9_per_pair.
+        coalesce(1).
+        write.
+        parquet(f"${tmp_data_dir}/icd9_per_pair.parquet")
 
-    // How many unique (admission, lab items) accompany each ICD-9
-    // code present?  ('lab item' here refers to the entire
-    // time-series, not every sample from it.)
-    val pairs_per_icd9 : DataFrame = labs_good_df.
-      join(diagnoses_icd, "HADM_ID").
-      groupBy("ICD9_CODE").
-      count.
-      withColumnRenamed("count", "adm_and_lab_count").
-      // Make a little more human-readable:
-      join(d_icd_diagnoses, "ICD9_CODE").
-      sort(desc("adm_and_lab_count"))
-    pairs_per_icd9.cache()
-    pairs_per_icd9.
-      coalesce(1).
-      write.
-      parquet(f"${tmp_data_dir}/pairs_per_icd9.parquet")
+      // How many unique (admission, lab items) accompany each ICD-9
+      // code present?  ('lab item' here refers to the entire
+      // time-series, not every sample from it.)
+      val pairs_per_icd9 : DataFrame = labs_good_df.
+        join(diagnoses_icd, "HADM_ID").
+        groupBy("ICD9_CODE").
+        count.
+        withColumnRenamed("count", "adm_and_lab_count").
+        // Make a little more human-readable:
+        join(d_icd_diagnoses, "ICD9_CODE").
+        sort(desc("adm_and_lab_count"))
+      pairs_per_icd9.cache()
+      pairs_per_icd9.
+        coalesce(1).
+        write.
+        parquet(f"${tmp_data_dir}/pairs_per_icd9.parquet")
 
-    // How many unique (admission, lab items) accompany each ICD-9
-    // *category* present?
-    val pairs_per_icd9_category : DataFrame = labs_good_df.
-      join(diagnoses_icd, "HADM_ID").
-      groupBy("ICD9_CATEGORY").
-      count.
-      withColumnRenamed("count", "adm_and_lab_count").
-      sort(desc("adm_and_lab_count"))
-    pairs_per_icd9_category.cache()
-    pairs_per_icd9_category.
-      coalesce(1).
-      write.
-      parquet(f"${tmp_data_dir}/pairs_per_icd9_category.parquet")
-    
+      // How many unique (admission, lab items) accompany each ICD-9
+      // *category* present?
+      val pairs_per_icd9_category : DataFrame = labs_good_df.
+        join(diagnoses_icd, "HADM_ID").
+        groupBy("ICD9_CATEGORY").
+        count.
+        withColumnRenamed("count", "adm_and_lab_count").
+        sort(desc("adm_and_lab_count"))
+      pairs_per_icd9_category.cache()
+      pairs_per_icd9_category.
+        coalesce(1).
+        write.
+        parquet(f"${tmp_data_dir}/pairs_per_icd9_category.parquet")
+    }
   }
 
 
