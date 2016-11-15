@@ -11,27 +11,6 @@ import org.apache.spark.storage.StorageLevel
 import java.sql.Timestamp
 // import com.cloudera.sparkts._
 
-case class PatientEventSeries(
-  adm_id: Int,
-  item_id: Int,
-  unit: String,
-  // series & warpedSeries: (time in days, value)
-  series: Iterable[(Double, String)],
-  warpedSeries: Iterable[(Double, String)]
-)
-
-case class LabItem(
-  item_id: Int,
-  label: String,
-  fluid: String,
-  category: String,
-  loincCode: String
-)
-
-// This is for lab_ts, which inexplicably has a NullPointerException
-// if I instead use a 4-tuple of identical fields.
-// case class LabWrapper(a1 : Int, a2 : Int, a3 : Int, a4 : String)
-
 object Main {
   def main(args: Array[String]) {
     val spark = Utils.createContext
@@ -57,9 +36,9 @@ object Main {
     val d_labitems = Utils.csv_from_s3(
       spark, f"${mimic3_dir}/D_LABITEMS.csv.gz", Some(Schemas.d_labitems))
     // D_LABITEMS is fairly small, so make a map of it:
-    val labitemMap : Map[Int,LabItem] = d_labitems.
+    val labitemMap : Map[Int, Schemas.LabItem] = d_labitems.
       rdd.map { r: Row =>
-        val li = LabItem(r.getAs("ITEMID"), r.getAs("LABEL"),
+        val li = Schemas.LabItem(r.getAs("ITEMID"), r.getAs("LABEL"),
           r.getAs("FLUID"), r.getAs("CATEGORY"), r.getAs("LOINC_CODE"))
         (li.item_id, li)
       }.collect.toMap
@@ -105,8 +84,7 @@ object Main {
 
     /*
     val diag_cohort = spark.read.parquet(f"${tmp_data_dir}/diag_cohort_${icd_code1}_${icd_code2}")
-    // No longer valid:
-    // val labs_cohort = spark.read.parquet(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.parquet")
+    val labs_cohort_flat = spark.read.parquet(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.parquet")
      */
   
     // Get those admissions which had >= 1 diagnosis of icd_code1, or
@@ -131,15 +109,17 @@ object Main {
 
     // Produce time-series, and warped time-series, for all admissions
     // in the cohort (for just the selected lab items):
-    val labs_cohort : RDD[PatientEventSeries] = labs_cohort_df.rdd.
+    val labs_cohort : RDD[Schemas.PatientEventSeries] = labs_cohort_df.rdd.
       map { row =>
         val k = (row.getAs[Int]("HADM_ID"),
           row.getAs[Int]("ITEMID"),
+          row.getAs[Int]("SUBJECT_ID"),
           row.getAs[String]("VALUEUOM"))
+        // Grouping on all of the above might be superfluous.  Unique admission
         val v = (row.getAs[Timestamp]("CHARTTIME").getTime / 86400000.0,
-          row.getAs[String]("VALUE"))
+          row.getAs[Double]("VALUENUM"))
         (k, v)
-      }.groupByKey.map { case ((adm, item, uom), series_raw) =>
+      }.groupByKey.map { case ((adm, item, subj, uom), series_raw) =>
           // Separate out times and values, and pass forward both
           // "original" time series and warped time series:
           val series = series_raw.toSeq.sortBy(_._1)
@@ -148,9 +128,10 @@ object Main {
           val relTimes = times.map(_ - start)
           val warpedTimes = Utils.polynomialTimeWarp(relTimes.toSeq)
           //val warpedTimes = relTimes
-          PatientEventSeries(
+          Schemas.PatientEventSeries(
             adm,
             item,
+            subj,
             uom,
             relTimes.zip(values),
             warpedTimes.zip(values)
@@ -160,12 +141,12 @@ object Main {
 
     // Flatten out to load elsewhere:
     val labs_cohort_flat : DataFrame =
-      labs_cohort.flatMap { p: PatientEventSeries =>
+      labs_cohort.flatMap { p: Schemas.PatientEventSeries =>
         val ts = p.series.zip(p.warpedSeries)
         ts.map { case ((t, _), (tw, value)) =>
-          (p.adm_id, p.item_id, p.unit, t, tw, value) 
+          (p.adm_id, p.item_id, p.subject_id, p.unit, t, tw, value) 
         }
-      }.toDF("HADM_ID", "ITEMID", "VALUEUOM", "CHARTTIME", "CHARTTIME_warped", "VALUE")
+      }.toDF("HADM_ID", "ITEMID", "SUBJECT_ID", "VALUEUOM", "CHARTTIME", "CHARTTIME_warped", "VALUENUM")
     labs_cohort_flat.
       coalesce(1).
       write.parquet(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.parquet")
@@ -176,21 +157,8 @@ object Main {
       option("header", "true").
       save(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.csv")
 
-    /*
-    // Get the minimum chart time into CHART_START for each admission
-    // & item:
-    val labs_chart_start : DataFrame = labs_cohort.
-      groupBy("HADM_ID", "ITEMID").
-      agg(min($"CHARTTIME")).
-      withColumnRenamed("min(CHARTTIME)", "CHART_START")
-
-    // Set CHARTTIME_REL to the 'relative' chart time:
-    /*val labs_cohort : DataFrame = labs_cohort1.
-      join(labs_chart_start, Seq("HADM_ID", "ITEMID")).
-      withColumn("CHARTTIME_REL", datediff($"CHARTTIME", $"CHART_START"))*/
-
-    labs_cohort.write.parquet(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.parquet")
-     */
+    // Log-likelihood example:
+    val labs_ll = Utils.sumLogLikelihood(labs_cohort, 1.5, 0.16, 2.43).sum
 
     /***********************************************************************
      * Exploratory stuff
@@ -283,101 +251,8 @@ object Main {
       write.
       parquet(f"${tmp_data_dir}/pairs_per_icd9_category.parquet")
     
-    // Get the actual time-series for the selected admissions & lab
-    // items:
-    val lab_ts = labs_good_df.
-      join(labevents, Seq("HADM_ID", "ITEMID"))
-    lab_ts.
-      coalesce(1).
-      write.
-      parquet(f"${tmp_data_dir}/lab_timeseries.parquet")
-
-    /*
-
-    // Get lab time-series for each: subject, admission, item
-    // (i.e. which lab test), and unit (which should be identical
-    // per-item).
-    val lab_ts2 = labevents.
-      groupByKey { r: Row =>
-        LabWrapper(r.getAs[Int]("SUBJECT_ID"),
-          r.getAs[Int]("HADM_ID"),
-          r.getAs[Int]("ITEMID"),
-          r.getAs[String]("VALUEUOM"))
-      }.mapGroups { (group, rows) =>
-        val series = rows.map { r =>
-          (r.getAs[Timestamp]("CHARTTIME"),
-            r.getAs[String]("VALUE"))
-        }.toSeq
-        group match {
-          case LabWrapper(subj,hadm,item,uom) =>
-            PatientEventSeries(subj, hadm, item, uom, series)
-        }
-      }
-    lab_ts2.persist(StorageLevel.MEMORY_AND_DISK)
-    // Above is causing NullPointerException for some reason if I
-    // modify the LabWrapper to instead just be a tuple (and likewise
-    // change the pattern-match to be over a tuple).  It seems to
-    // happen even if I take just the groupByKey output, and if I use
-    // 3 elements in the tuple rather than 4.  It goes away if I use
-    // only 2 elements.
-    //
-    // I also observed an issue that looked something like:
-    // https://issues.apache.org/jira/browse/SPARK-12063
-
-    // This is (probably) slower, but lacks that NullPointerException:
-    val lab_ts_rdd = labevents.
-      rdd.map { row =>
-        ((row.getAs[Int]("SUBJECT_ID"),
-          row.getAs[Int]("HADM_ID"),
-          row.getAs[Int]("ITEMID")),
-          (row.getAs[String]("VALUEUOM"),
-            row.getAs[Timestamp]("CHARTTIME"),
-            row.getAs[String]("VALUE"))
-        )
-        // ((subject ID, adm. ID, item ID),
-        //  (unit, value, time))
-      }.groupByKey.map { case ((subj, adm, item), l) =>
-          // This is clunky (what if units may differ?):
-          val unit = l.toList(0)._1
-          val series = l.map { case (_,t,v) => (t,v) }.toList
-          PatientEventSeries(subj, adm, item, unit, series)
-      }
-    lab_ts_rdd.persist(StorageLevel.MEMORY_AND_DISK)
-
-    /*
-    val groups_with_type = labs_grouped.
-      join(d_labitems, "ITEMID").
-      join(loinc, loinc("LOINC_NUM") === d_labitems("LOINC_CODE")).
-      select("ITEMID", "SUBJECT_ID", "count", "LABEL", "FLUID", "CATEGORY", "LOINC_CODE", "LONG_COMMON_NAME")
-    // pprint(groups_with_type, Some(100))
-    val lab_events_per_patient = groups_with_type.
-      groupBy("ITEMID").
-      mean("count").
-      orderBy(desc("avg(count)"))
-    // pprint(lab_events_per_patient, Some(100))
-    val labs_grouped = labevents.
-      groupBy("SUBJECT_ID", "ITEMID").
-      count.
-      orderBy(desc("count"))
-    labs_grouped.persist(StorageLevel.MEMORY_AND_DISK)
-     */
-
-    // ICD9 counts per-patient:
-    val icd9counts = diagnoses_icd.
-      groupBy("SUBJECT_ID", "ICD9_CODE").
-      count.
-      sort(desc("count")).
-      join(d_icd_diagnoses, "ICD9_CODE")
-
-    // Per-patient, per-encounter:
-    val icd9counts_adm = diagnoses_icd.
-      groupBy("SUBJECT_ID", "ICD9_CODE", "HADM_ID").
-      count.
-      join(d_icd_diagnoses, "ICD9_CODE").
-      sort(desc("count"))
-
-     */
   }
+
 
   /*
    val admissions = Utils.csv_from_s3("ADMISSIONS")
@@ -401,5 +276,6 @@ object Main {
    val procedures_icd = Utils.csv_from_s3("PROCEDURES_ICD")
    val services = Utils.csv_from_s3("SERVICES")
    val transfers = Utils.csv_from_s3("TRANSFERS")
-   */
+   */  
+
 }
