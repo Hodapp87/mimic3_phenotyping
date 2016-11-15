@@ -86,24 +86,24 @@ case object Utils {
     sigma2 :* pow(((mtx :* mtx) :/ (2*alpha*tau*tau)) + 1.0, -alpha)
   }
 
-  def sumLogLikelihood(ts : RDD[Schemas.PatientEventSeries],
-    sigma2 : Double, alpha : Double, tau : Double) : RDD[Double] =
+  def logLikelihood(ts : Iterable[(Double, Double)],
+    sigma2 : Double, alpha : Double, tau : Double) : Double =
   {
-    ts.map { p: Schemas.PatientEventSeries =>
-      val (x, y) = p.warpedSeries.unzip
-      // Refer to Rasmussen & Williams, algorithm 2.1:
-      val n : Int = x.size
-      val K = rationalQuadraticCovar(x, x, sigma2, alpha, tau)
-      val L = cholesky.apply(K + BDM.eye[Double](n) :* sigma2)
-      val ym : BDM[Double] = new BDM(n, 1, y.toArray)
-      val alph = L.t \ (L \ ym)
-      // ym.t is 1 x n, alph is n x 1, thus prod is 1 x 1, so (0,0) in
-      // 'll' is the only element.  Also, I must do this separately
-      // because indices can't go on the expression for some reason.
-      val prod = ym.t * alph
-      val ll = -(prod(0,0) / 2.0) - sum(log(diag(L))) - (n * log(2*Math.PI))/2
-      ll
-    }
+    // TODO: Comment more fully.
+    // ts is (time, value).
+    val (x, y) = ts.unzip
+    // Refer to Rasmussen & Williams, algorithm 2.1:
+    val n : Int = x.size
+    val K = rationalQuadraticCovar(x, x, sigma2, alpha, tau)
+    val L = cholesky.apply(K + BDM.eye[Double](n) :* sigma2)
+    val ym : BDM[Double] = new BDM(n, 1, y.toArray)
+    val alph = L.t \ (L \ ym)
+    // ym.t is 1 x n, alph is n x 1, thus prod is 1 x 1, so (0,0) in
+    // 'll' is the only element.  Also, I must do this separately
+    // because indices can't go on the expression for some reason.
+    val prod = ym.t * alph
+    val ll = -(prod(0,0) / 2.0) - sum(log(diag(L))) - (n * log(2*Math.PI))/2
+    ll
   }
 
   /** Pretty-print a dataframe for Zeppelin.  Either supply

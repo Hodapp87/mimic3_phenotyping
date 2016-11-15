@@ -3,6 +3,8 @@ package edu.gatech.cse8803.main
 import edu.gatech.cse8803.util.Utils
 import edu.gatech.cse8803.util.Schemas
 
+import org.apache.spark.ml.param._
+import org.apache.spark.ml.tuning._
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql._
 import org.apache.spark.sql.functions._
@@ -14,6 +16,7 @@ import java.sql.Timestamp
 object Main {
   def main(args: Array[String]) {
     val spark = Utils.createContext
+    val sc = spark.sparkContext
     import spark.implicits._
 
     // Input data directories
@@ -158,7 +161,41 @@ object Main {
       save(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.csv")
 
     // Log-likelihood example:
-    val labs_ll = Utils.sumLogLikelihood(labs_cohort, 1.5, 0.16, 2.43).sum
+    // val labs_ll = Utils.sumLogLikelihood(labs_cohort, 1.5, 0.16, 2.43).sum
+
+    val sigma2Param = new DoubleParam("", "sigma2", "")
+    val alphaParam = new DoubleParam("", "alpha", "")
+    val tauParam = new DoubleParam("", "tau", "")
+
+    val paramGrid = new ParamGridBuilder().
+      addGrid(sigma2Param, 0.1 to 2.0 by 0.1).
+      addGrid(alphaParam, 0.1 to 1.0 by 0.025).
+      addGrid(tauParam, 0.1 to 4.0 by 0.05).
+      build.
+      map { pm =>
+        (pm.getOrElse(sigma2Param, 0.0),
+          pm.getOrElse(alphaParam, 0.0),
+          pm.getOrElse(tauParam, 0.0))
+      }
+
+    val paramRdd : RDD[(Double, Double, Double)] = sc.parallelize(paramGrid)
+
+    val labs_ll : RDD[((Double, Double, Double), Double)] = paramRdd.
+      cartesian(labs_cohort).
+      map { case (t@(sigma2, alpha, tau), series) =>
+        (t, Utils.logLikelihood(series.warpedSeries, sigma2, alpha, tau))
+      }.foldByKey(0.0)(_ + _)
+    labs_ll.cache()
+
+    // optimal: ((Double, Double, Double), Double) =
+    // ((1.5000000000000002,0.125,3.2499999999999964),-109216.21495499206)
+    val optimal = labs_ll.
+      aggregate((0.0, 0.0, 0.0), Double.NegativeInfinity)(
+        { case(_, t) => t },
+        { (t1,t2) => if (t1._2 > t2._2) t1 else t2 }
+      )
+    // Fucking Spark, would it kill you to provide an argmax/argmin
+    // function?
 
     /***********************************************************************
      * Exploratory stuff
