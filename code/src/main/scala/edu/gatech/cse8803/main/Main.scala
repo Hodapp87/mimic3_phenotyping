@@ -20,10 +20,10 @@ object Main {
     import spark.implicits._
 
     // Input data directories
-    //val tmp_data_dir : String = "s3://bd4h-mimic3/temp/"
-    //val mimic3_dir : String = "s3://bd4h-mimic3/"
-    val tmp_data_dir : String = "file:///home/hodapp/source/bd4h-project/data-temp/"
-    val mimic3_dir : String = "file:////mnt/dev/mimic3/"
+    val tmp_data_dir : String = "s3://bd4h-mimic3/cohort_518_584_50820/"
+    val mimic3_dir : String = "s3://bd4h-mimic3/"
+    //val tmp_data_dir : String = "file:///home/hodapp/source/bd4h-project/data-temp/"
+    //val mimic3_dir : String = "file:////mnt/dev/mimic3/"
 
     import org.apache.log4j.Logger
     import org.apache.log4j.Level
@@ -188,12 +188,13 @@ object Main {
 
     val paramRdd : RDD[(Double, Double, Double)] = sc.parallelize(paramGrid)
 
-    // TODO: Run this tonight
+    // TODO: Re-run this tonight (commented result is for longer
+    // series only)
     if (false) {
       val labs_ll : RDD[((Double, Double, Double), Double)] = paramRdd.
         cartesian(labs_cohort).
         map { case (t@(sigma2, alpha, tau), series) =>
-          (t, Utils.logLikelihood(series.warpedSeries, sigma2, alpha, tau))
+          (t, Utils.gprTrain(series.warpedSeries, sigma2, alpha, tau)._1)
         }.foldByKey(0.0)(_ + _)
       labs_ll.cache()
 
