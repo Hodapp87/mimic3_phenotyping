@@ -26,10 +26,10 @@ object Main {
     import spark.implicits._
 
     // Input data directories
-    val tmp_data_dir : String = "s3://bd4h-mimic3/cohort_518_584_50820/"
-    val mimic3_dir : String = "s3://bd4h-mimic3/"
-    //val tmp_data_dir : String = "file:///home/hodapp/source/bd4h-project/data-temp/"
-    //val mimic3_dir : String = "file:////mnt/dev/mimic3/"
+    //val tmp_data_dir : String = "s3://bd4h-mimic3/cohort_518_584_50820/"
+    //val mimic3_dir : String = "s3://bd4h-mimic3/"
+    val tmp_data_dir : String = "file:///home/hodapp/source/bd4h-project/data-temp/"
+    val mimic3_dir : String = "file:////mnt/dev/mimic3/"
 
     // TODO: Perhaps pass the above in as commandline options
 
@@ -213,6 +213,17 @@ object Main {
         )
       // Fucking Spark, would it kill you to provide an argmax/argmin
       // function?
+
+      // Quick hack to write the hyperparameters to disk:
+      sc.parallelize(Seq(optimal)).
+        map { case ((sig2, a, t), ll) => (sig2, a, t, ll, lab_min_series, item_test) }.
+        toDF("sigma2", "alpha", "tau", "log_likelihood", "lab_min_series", "item_test").
+        coalesce(1).
+        write.
+        format("com.databricks.spark.csv").
+        option("header", "true").
+        save(f"${tmp_data_dir}/hyperparams_${icd_code1}_${icd_code2}.csv")
+      
     }
 
     // Regression example:
