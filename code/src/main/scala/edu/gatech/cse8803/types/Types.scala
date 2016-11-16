@@ -18,6 +18,18 @@ case class LabItem(
   loincCode: String
 )
 
+/*
+case class GaussionProcessModel(
+  // sigma^2, i.e. noise level
+  sigma2: Double,
+  // alpha for rational quadratic function:
+  alpha: Double,
+  // tau (time scale) for rational quadratic function:
+  tau: Double,
+  // 
+
+)
+ */
 
 // This is for lab_ts, which inexplicably has a NullPointerException
 // if I instead use a 4-tuple of identical fields.

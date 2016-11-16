@@ -96,7 +96,7 @@ object Main {
     // To bypass:
     /*
     val diag_cohort = spark.read.parquet(f"${tmp_data_dir}/diag_cohort_${icd_code1}_${icd_code2}.parquet")
-    val labs_cohort : RDD[Schemas.PatientEventSeries] = sc.
+    val labs_cohort : RDD[PatientEventSeries] = sc.
       objectFile(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}_rdd")
     val labs_cohort_flat = spark.read.parquet(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.parquet")
      */
@@ -157,13 +157,7 @@ object Main {
       saveAsObjectFile(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}_rdd")    // Yes, this coalesce(1) is bad practice.
 
     // Flatten out to load elsewhere:
-    val labs_cohort_flat : DataFrame =
-      labs_cohort.flatMap { p: PatientEventSeries =>
-        val ts = p.series.zip(p.warpedSeries)
-        ts.map { case ((t, _), (tw, value)) =>
-          (p.adm_id, p.item_id, p.subject_id, p.unit, t, tw, value) 
-        }
-      }.toDF("HADM_ID", "ITEMID", "SUBJECT_ID", "VALUEUOM", "CHARTTIME", "CHARTTIME_warped", "VALUENUM")
+    val labs_cohort_flat : DataFrame = Utils.flattenTimeseries(spark, labs_cohort)
     labs_cohort_flat.
       coalesce(1).
       write.parquet(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.parquet")
@@ -236,9 +230,43 @@ object Main {
       // Train a model for every time-series in training set:
       val t@(ll, matL, matA) = Utils.gprTrain(p.warpedSeries, sigma2, alpha, tau)
 
-      t
+      (p, matL, matA)
     }
-   
+    // gprModels then has (PatientEventSeries, L matrix, A matrix) for
+    // every training time-series.
+
+    // How many days before & after do we interpolate for?
+    val padding = 5.0
+    // What interval (in days) do we interpolate with?
+    val interval = 0.5
+    // Create a new time-series with these predictions:
+    val tsInterpolated = gprModels.map { case (p, matL, matA) =>
+      val ts = p.warpedSeries.map(_._1)
+      val ts2 = (ts.min - padding) to (ts.max + padding) by interval
+      val predictions = Utils.gprPredict(ts2, ts, matL, matA, sigma2, alpha, tau)
+      PatientEventSeries(p.adm_id, p.item_id, p.subject_id, p.unit, predictions, predictions)
+    }
+
+    val tsInterp_flat : DataFrame = Utils.flattenTimeseries(spark, tsInterpolated)
+    tsInterp_flat.
+      coalesce(1).
+      write.parquet(f"${tmp_data_dir}/labs_cohort_predict_${icd_code1}_${icd_code2}.parquet")
+    tsInterp_flat.
+      coalesce(1).
+      write.
+      format("com.databricks.spark.csv").
+      option("header", "true").
+      save(f"${tmp_data_dir}/labs_cohort_predict_${icd_code1}_${icd_code2}.csv")
+
+    /*
+    val labs_cohort_flat : DataFrame =
+      labs_cohort.flatMap { p: PatientEventSeries =>
+        val ts = p.series.zip(p.warpedSeries)
+        ts.map { case ((t, _), (tw, value)) =>
+          (p.adm_id, p.item_id, p.subject_id, p.unit, t, tw, value) 
+        }
+      }.toDF("HADM_ID", "ITEMID", "SUBJECT_ID", "VALUEUOM", "CHARTTIME", "CHARTTIME_warped", "VALUENUM")
+     */
 
     if (false) {
 

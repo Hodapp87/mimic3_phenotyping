@@ -1,5 +1,7 @@
 package edu.gatech.cse8803.util
 
+import edu.gatech.cse8803.types._
+
 import breeze.linalg.{DenseVector => BDV, DenseMatrix => BDM, sum}
 import breeze.linalg._
 import breeze.numerics._
@@ -160,5 +162,15 @@ case object Utils {
     val zeppelin_pfx = " "
     println(f"${zeppelin_pfx}${hdr}\n${table}")
   }
- 
+
+  def flattenTimeseries(spark : SparkSession, rdd : RDD[PatientEventSeries]) : DataFrame = {
+    import spark.implicits._
+    rdd.flatMap { p: PatientEventSeries =>
+      val ts = p.series.zip(p.warpedSeries)
+      ts.map { case ((t, _), (tw, value)) =>
+        (p.adm_id, p.item_id, p.subject_id, p.unit, t, tw, value)
+      }
+    }.toDF("HADM_ID", "ITEMID", "SUBJECT_ID", "VALUEUOM", "CHARTTIME", "CHARTTIME_warped", "VALUENUM")
+  }
+
 }
