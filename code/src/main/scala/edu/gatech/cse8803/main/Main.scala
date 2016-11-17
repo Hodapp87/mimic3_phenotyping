@@ -256,6 +256,7 @@ object Main {
       val sigma2 = 1.4
       val alpha = 0.1
       val tau = 3.55
+      // TODO: Pull these out to commandline options?  Or something
       val gprModels = labs_cohort_train.map { p: PatientTimeSeries =>
         // Train a model for every time-series in training set:
         val t@(ll, matL, matA) = Utils.gprTrain(p.warpedSeries, sigma2, alpha, tau)
@@ -269,9 +270,11 @@ object Main {
       // time range.
 
       // How many days before & after do we interpolate for?
-      val padding = 5.0
+      val padding = 7.5
       // What interval (in days) do we interpolate with?
       val interval = 0.5
+      // TODO: Make these commandline options too?
+
       // Create a new time-series with these predictions:
       val tsInterpolated = gprModels.map { case (p, matL, matA) =>
         val ts = p.warpedSeries.map(_._1)
