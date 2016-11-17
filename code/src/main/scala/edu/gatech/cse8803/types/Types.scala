@@ -1,13 +1,24 @@
 package edu.gatech.cse8803.types
 
-case class PatientEventSeries(
+case class PatientTimeSeries(
   adm_id: Int,
   item_id: Int,
   subject_id: Int,
   unit: String,
+  icd9category: String,
   // series & warpedSeries: (time in days, value)
   series: Iterable[(Double, Double)],
   warpedSeries: Iterable[(Double, Double)]
+)
+
+case class PatientTimeSeriesPredicted(
+  adm_id: Int,
+  item_id: Int,
+  subject_id: Int,
+  unit: String,
+  icd9category: String,
+  // (time in days, mean, variance)
+  predictions: Iterable[(Double, Double, Double)]
 )
 
 case class LabItem(

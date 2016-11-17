@@ -109,7 +109,7 @@ case object Utils {
     // Refer to Rasmussen & Williams, algorithm 2.1:
     val n : Int = x.size
     val K = rationalQuadraticCovar(x, x, sigma2, alpha, tau)
-    val L = cholesky.apply(K + BDM.eye[Double](n) :* sigma2)
+    val L = cholesky.apply(K + BDM.eye[Double](n) * sigma2)
     val ym : BDM[Double] = new BDM(n, 1, y.toArray)
     val A = L.t \ (L \ ym)
     // ym.t is 1 x n, alph is n x 1, thus prod is 1 x 1, so (0,0) in
@@ -163,14 +163,23 @@ case object Utils {
     println(f"${zeppelin_pfx}${hdr}\n${table}")
   }
 
-  def flattenTimeseries(spark : SparkSession, rdd : RDD[PatientEventSeries]) : DataFrame = {
+  def flattenTimeseries(spark : SparkSession, rdd : RDD[PatientTimeSeries]) : DataFrame = {
     import spark.implicits._
-    rdd.flatMap { p: PatientEventSeries =>
+    rdd.flatMap { p: PatientTimeSeries =>
       val ts = p.series.zip(p.warpedSeries)
       ts.map { case ((t, _), (tw, value)) =>
-        (p.adm_id, p.item_id, p.subject_id, p.unit, t, tw, value)
+        (p.adm_id, p.item_id, p.subject_id, p.unit, p.icd9category, tw, value)
       }
-    }.toDF("HADM_ID", "ITEMID", "SUBJECT_ID", "VALUEUOM", "CHARTTIME", "CHARTTIME_warped", "VALUENUM")
+    }.toDF("HADM_ID", "ITEMID", "SUBJECT_ID", "VALUEUOM", "ICD9_CATEGORY", "CHARTTIME", "CHARTTIME_warped", "VALUENUM")
   }
 
+  def flattenPredictedTimeseries(spark : SparkSession, rdd : RDD[PatientTimeSeriesPredicted]) : DataFrame = {
+    import spark.implicits._
+    rdd.flatMap { p: PatientTimeSeriesPredicted =>
+      p.predictions.map { case (tval, mean, variance) =>
+        (p.adm_id, p.item_id, p.subject_id, p.unit, p.icd9category, tval, mean, variance)
+      }
+    }.toDF("HADM_ID", "ITEMID", "SUBJECT_ID", "VALUEUOM", "ICD9_CATEGORY", "CHARTTIME_warped", "MEAN", "VARIANCE")
+  }
+  
 }

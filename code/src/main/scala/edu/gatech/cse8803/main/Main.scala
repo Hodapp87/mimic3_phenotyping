@@ -12,7 +12,6 @@ import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
 import org.apache.spark.storage.StorageLevel
 import java.sql.Timestamp
-// import com.cloudera.sparkts._
 
 object Main {
   def main(args: Array[String]): Unit = {
@@ -30,6 +29,21 @@ object Main {
     //val mimic3_dir : String = "s3://bd4h-mimic3/"
     val tmp_data_dir : String = "file:///home/hodapp/source/bd4h-project/data-temp/"
     val mimic3_dir : String = "file:////mnt/dev/mimic3/"
+
+    val computeLabs = true
+    val optimizeHyperparams = false
+    val regression = true
+    // What is the minimum length (number of samples/events) in a
+    // time-series that we'll consider for a given admission & item?
+    val lab_min_series = 3
+    val lab_min_patients = 30
+
+    // Two ICD codes; we want one or the other, but not both.
+    val icd_code1 = "518"
+    val icd_code2 = "584"
+
+    // ITEMID of the test we're interested in:
+    val item_test = 50820
 
     // TODO: Perhaps pass the above in as commandline options
 
@@ -72,18 +86,6 @@ object Main {
       spark, f"${mimic3_dir}/DIAGNOSES_ICD.csv.gz", Some(Schemas.diagnoses)).
       withColumn("ICD9_CATEGORY", $"ICD9_CODE".substr(0, 3))
 
-    // What is the minimum length (number of samples/events) in a
-    // time-series that we'll consider for a given admission & item?
-    val lab_min_series = 3
-    val lab_min_patients = 30
-
-    // Two ICD codes; we want one or the other, but not both.
-    val icd_code1 = "518"
-    val icd_code2 = "584"
-
-    // ITEMID of the test we're interested in:
-    val item_test = 50820
-
     // Get (HADM_ID, ITEM_ID) for those admissions and lab items which
     // meet 'lab_min_series':
     val labs_length_ok : DataFrame = labevents.
@@ -93,113 +95,130 @@ object Main {
       filter($"count" >= lab_min_series).
       select("HADM_ID", "ITEMID")
 
-    // To bypass:
-    /*
-    val diag_cohort = spark.read.parquet(f"${tmp_data_dir}/diag_cohort_${icd_code1}_${icd_code2}.parquet")
-    val labs_cohort : RDD[PatientEventSeries] = sc.
-      objectFile(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}_rdd")
-    val labs_cohort_flat = spark.read.parquet(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.parquet")
-     */
-  
-    // Get those admissions which had >= 1 diagnosis of icd_code1, or
-    // of icd_code2, but not diagnoses of both.
-    val diag_cohort : DataFrame = diagnoses_icd.
-      withColumn("is_code1", ($"ICD9_CATEGORY" === icd_code1).cast(IntegerType)).
-      withColumn("is_code2", ($"ICD9_CATEGORY" === icd_code2).cast(IntegerType)).
-      groupBy("HADM_ID").
-      sum("is_code1", "is_code2").
-      withColumnRenamed("sum(is_code1)", "num_code1").
-      withColumnRenamed("sum(is_code2)", "num_code2").
-      filter(($"num_code1" > 0) =!= ($"num_code2" > 0))
-    diag_cohort.cache()
-    diag_cohort.write.parquet(f"${tmp_data_dir}/diag_cohort_${icd_code1}_${icd_code2}.parquet")
+    val (diag_cohort, labs_cohort, labs_cohort_flat) =
+      if (computeLabs) {
+        // Get those admissions which had >= 1 diagnosis of icd_code1, or
+        // of icd_code2, but not diagnoses of both.
+        val diag_cohort : DataFrame = diagnoses_icd.
+          withColumn("is_code1", ($"ICD9_CATEGORY" === icd_code1).cast(IntegerType)).
+          withColumn("is_code2", ($"ICD9_CATEGORY" === icd_code2).cast(IntegerType)).
+          groupBy("HADM_ID").
+          sum("is_code1", "is_code2").
+          withColumnRenamed("sum(is_code1)", "num_code1").
+          withColumnRenamed("sum(is_code2)", "num_code2").
+          filter(($"num_code1" > 0) =!= ($"num_code2" > 0))
+        diag_cohort.cache()
+        diag_cohort.
+          write.
+          mode(SaveMode.Overwrite).
+          parquet(f"${tmp_data_dir}/diag_cohort_${icd_code1}_${icd_code2}.parquet")
 
-    // Get the lab events which meet 'lab_min_series', which are from
-    // an admission in the cohort, and which are of the desired test.
-    val labs_cohort_df : DataFrame = labs_length_ok.
-      join(labevents, Seq("HADM_ID", "ITEMID")).
-      filter($"ITEMID" === item_test).
-      join(diag_cohort, Seq("HADM_ID"))
+        // Get the lab events which meet 'lab_min_series', which are from
+        // an admission in the cohort, and which are of the desired test.
+        val labs_cohort_df : DataFrame = labs_length_ok.
+          join(labevents, Seq("HADM_ID", "ITEMID")).
+          filter($"ITEMID" === item_test).
+          join(diag_cohort, Seq("HADM_ID"))
 
-    // Produce time-series, and warped time-series, for all admissions
-    // in the cohort (for just the selected lab items):
-    val labs_cohort : RDD[PatientEventSeries] = labs_cohort_df.rdd.
-      map { row =>
-        val k = (row.getAs[Int]("HADM_ID"),
-          row.getAs[Int]("ITEMID"),
-          row.getAs[Int]("SUBJECT_ID"),
-          row.getAs[String]("VALUEUOM"))
-        // Grouping on all of the above might be superfluous.  Unique admission
-        val v = (row.getAs[Timestamp]("CHARTTIME").getTime / 86400000.0,
-          row.getAs[Double]("VALUENUM"))
-        (k, v)
-      }.groupByKey.map { case ((adm, item, subj, uom), series_raw) =>
-          // Separate out times and values, and pass forward both
-          // "original" time series and warped time series:
-          val series = series_raw.toSeq.sortBy(_._1)
-          val (times, values) = series.unzip
-          val start = times.min
-          val relTimes = times.map(_ - start)
-          val warpedTimes = Utils.polynomialTimeWarp(relTimes.toSeq)
-          //val warpedTimes = relTimes
-          PatientEventSeries(
-            adm,
-            item,
-            subj,
-            uom,
-            relTimes.zip(values),
-            warpedTimes.zip(values)
-          )
-      }
-    labs_cohort.persist(StorageLevel.MEMORY_AND_DISK)
-    labs_cohort.
-      coalesce(1).
-      saveAsObjectFile(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}_rdd")    // Yes, this coalesce(1) is bad practice.
+        // Produce time-series, and warped time-series, for all admissions
+        // in the cohort (for just the selected lab items):
+        val labs_cohort : RDD[PatientTimeSeries] = labs_cohort_df.rdd.
+          map { row =>
+            val code1 = row.getAs[Boolean]("num_code1")
+            val code2 = row.getAs[Boolean]("num_code2")
+            val k = (row.getAs[Int]("HADM_ID"),
+              row.getAs[Int]("ITEMID"),
+              row.getAs[Int]("SUBJECT_ID"),
+              row.getAs[String]("VALUEUOM"),
+              if (code1) icd_code1 else { if (code2) icd_code2 else "" })
+            // Grouping on all of the above might be superfluous.  Unique admission
+            // implies unique subject.
+            val v = (row.getAs[Timestamp]("CHARTTIME").getTime / 86400000.0,
+              row.getAs[Double]("VALUENUM"))
+            (k, v)
+          }.groupByKey.map { case ((adm, item, subj, uom, code), series_raw) =>
+              // Separate out times and values, and pass forward both
+              // "original" time series and warped time series:
+              val series = series_raw.toSeq.sortBy(_._1)
+              val (times, values) = series.unzip
+              val start = times.min
+              val relTimes = times.map(_ - start)
+              val warpedTimes = Utils.polynomialTimeWarp(relTimes.toSeq)
+              //val warpedTimes = relTimes
+              PatientTimeSeries(
+                adm,
+                item,
+                subj,
+                uom,
+                code,
+                relTimes.zip(values),
+                warpedTimes.zip(values)
+              )
+          }
+        // TODO: Get rid of groupByKey above and see if it helps
+        // performance.
+        // I removed coalesce below, but haven't tested that yet.
+        // It seems
+        labs_cohort.persist(StorageLevel.MEMORY_AND_DISK)
+        labs_cohort.
+          saveAsObjectFile(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}_rdd")
 
-    // Flatten out to load elsewhere:
-    val labs_cohort_flat : DataFrame = Utils.flattenTimeseries(spark, labs_cohort)
-    labs_cohort_flat.
-      coalesce(1).
-      write.parquet(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.parquet")
-    labs_cohort_flat.
-      coalesce(1).
-      write.
-      format("com.databricks.spark.csv").
-      option("header", "true").
-      save(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.csv")
-
-    // Hyperparameter optimization:
-    val sigma2Param = new DoubleParam("", "sigma2", "")
-    val alphaParam = new DoubleParam("", "alpha", "")
-    val tauParam = new DoubleParam("", "tau", "")
-
-    val paramGrid = new ParamGridBuilder().
-      addGrid(sigma2Param, 0.1 to 2.0 by 0.1).
-      addGrid(alphaParam, 0.05 to 0.5 by 0.05).
-      addGrid(tauParam, 1.5 to 4.0 by 0.05).
-      build.
-      map { pm =>
-        (pm.get(sigma2Param).get,
-          pm.get(alphaParam).get,
-          pm.get(tauParam).get)
-        // The .get is intentional; it *should* throw an exception if
-        // it can't find the parameter this early.
+        // Flatten out to load elsewhere:
+        val labs_cohort_flat : DataFrame = Utils.flattenTimeseries(spark, labs_cohort)
+        labs_cohort_flat.
+          write.
+          mode(SaveMode.Overwrite).
+          parquet(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.parquet")
+        labs_cohort_flat.
+          coalesce(1).
+          write.
+          mode(SaveMode.Overwrite).
+          format("com.databricks.spark.csv").
+          option("header", "true").
+          save(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.csv")
+        (diag_cohort, labs_cohort, labs_cohort_flat)
+      } else {
+        println("Loading saved data for diag & labs...")
+        val diag_cohort = spark.read.parquet(f"${tmp_data_dir}/diag_cohort_${icd_code1}_${icd_code2}.parquet")
+        val labs_cohort : RDD[PatientTimeSeries] = sc.
+          objectFile(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}_rdd")
+        val labs_cohort_flat = spark.read.parquet(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.parquet")
+        (diag_cohort, labs_cohort, labs_cohort_flat)
       }
 
-    val paramRdd : RDD[(Double, Double, Double)] = sc.parallelize(paramGrid)
+    if (optimizeHyperparams) {
 
-    // TODO: Re-run this tonight (commented result is for longer
-    // series only)
-    if (false) {
-      val labs_ll : RDD[((Double, Double, Double), Double)] = paramRdd.
-        cartesian(labs_cohort).
-        map { case (t@(sigma2, alpha, tau), series) =>
-          (t, Utils.gprTrain(series.warpedSeries, sigma2, alpha, tau)._1)
-        }.foldByKey(0.0)(_ + _)
-      labs_ll.cache()
+      // Hyperparameter optimization:
+      val sigma2Param = new DoubleParam("", "sigma2", "")
+      val alphaParam = new DoubleParam("", "alpha", "")
+      val tauParam = new DoubleParam("", "tau", "")
 
-      // optimal: ((Double, Double, Double), Double) =
-      // ((1.5000000000000002,0.125,3.2499999999999964),-109216.21495499206)
+      val paramGrid : Array[(Double, Double, Double)] = new ParamGridBuilder().
+        addGrid(sigma2Param, 0.1 to 2.0 by 0.1).
+        addGrid(alphaParam, 0.05 to 0.5 by 0.05).
+        addGrid(tauParam, 1.5 to 4.0 by 0.05).
+        build.
+        map { pm =>
+          (pm.get(sigma2Param).get,
+            pm.get(alphaParam).get,
+            pm.get(tauParam).get)
+          // The .get is intentional; it *should* throw an exception if
+          // it can't find the parameter this early.
+        }
+      
+      val paramGridVar = sc.broadcast(paramGrid)
+
+      // Why is this flatMap seemingly only using a single node?
+      // Is it the coalesce() call?  How many partitions exist?
+      // Is it the groupByKey above?
+      val labs_ll : RDD[((Double, Double, Double), Double)] = 
+        labs_cohort.flatMap { series =>
+          val s = series.warpedSeries
+          paramGridVar.value.map { case t@(sigma2, alpha, tau) =>
+            (t, Utils.gprTrain(s, sigma2, alpha, tau)._1)
+          }
+        }.reduceByKey(_ + _)
+
       val optimal = labs_ll.
         aggregate((0.0, 0.0, 0.0), Double.NegativeInfinity)(
           { case(_, t) => t },
@@ -214,53 +233,60 @@ object Main {
         toDF("sigma2", "alpha", "tau", "log_likelihood", "lab_min_series", "item_test").
         coalesce(1).
         write.
+        mode(SaveMode.Overwrite).
         format("com.databricks.spark.csv").
         option("header", "true").
         save(f"${tmp_data_dir}/hyperparams_${icd_code1}_${icd_code2}.csv")
       
     }
 
-    // Regression example:
-    val sigma2 = 1.5
-    val alpha = 0.125
-    val tau = 3.25
-    val labs_cohort_split = labs_cohort.randomSplit(Array(0.7, 0.3), 0x12345)
-    val labs_cohort_train = labs_cohort_split(0)
-    val gprModels = labs_cohort_train.map { p: PatientEventSeries =>
-      // Train a model for every time-series in training set:
-      val t@(ll, matL, matA) = Utils.gprTrain(p.warpedSeries, sigma2, alpha, tau)
+    if (regression) {
+      // Regression example:
+      val sigma2 = 1.4
+      val alpha = 0.1
+      val tau = 3.55
+      val labs_cohort_split = labs_cohort.randomSplit(Array(0.7, 0.3), 0x12345)
+      val labs_cohort_train = labs_cohort_split(0)
+      val gprModels = labs_cohort_train.map { p: PatientTimeSeries =>
+        // Train a model for every time-series in training set:
+        val t@(ll, matL, matA) = Utils.gprTrain(p.warpedSeries, sigma2, alpha, tau)
 
-      (p, matL, matA)
+        (p, matL, matA)
+      }
+      // gprModels then has (PatientTimeSeries, L matrix, A matrix) for
+      // every training time-series.
+
+      // How many days before & after do we interpolate for?
+      val padding = 5.0
+      // What interval (in days) do we interpolate with?
+      val interval = 0.5
+      // Create a new time-series with these predictions:
+      val tsInterpolated = gprModels.map { case (p, matL, matA) =>
+        val ts = p.warpedSeries.map(_._1)
+        val ts2 = (ts.min - padding) to (ts.max + padding) by interval
+        val predictions = Utils.gprPredict(ts2, ts, matL, matA, sigma2, alpha, tau)
+        PatientTimeSeriesPredicted(p.adm_id, p.item_id, p.subject_id, p.unit,
+          p.icd9category,
+          (ts2, predictions.map(_._1), predictions.map(_._2)).zipped.toList)
+      }
+
+      val tsInterp_flat : DataFrame = Utils.flattenPredictedTimeseries(spark, tsInterpolated)
+      tsInterp_flat.
+        write.
+        mode(SaveMode.Overwrite).
+        parquet(f"${tmp_data_dir}/labs_cohort_predict_${icd_code1}_${icd_code2}.parquet")
+      tsInterp_flat.
+        coalesce(1).
+        write.
+        mode(SaveMode.Overwrite).
+        format("com.databricks.spark.csv").
+        option("header", "true").
+        save(f"${tmp_data_dir}/labs_cohort_predict_${icd_code1}_${icd_code2}.csv")
     }
-    // gprModels then has (PatientEventSeries, L matrix, A matrix) for
-    // every training time-series.
-
-    // How many days before & after do we interpolate for?
-    val padding = 5.0
-    // What interval (in days) do we interpolate with?
-    val interval = 0.5
-    // Create a new time-series with these predictions:
-    val tsInterpolated = gprModels.map { case (p, matL, matA) =>
-      val ts = p.warpedSeries.map(_._1)
-      val ts2 = (ts.min - padding) to (ts.max + padding) by interval
-      val predictions = Utils.gprPredict(ts2, ts, matL, matA, sigma2, alpha, tau)
-      PatientEventSeries(p.adm_id, p.item_id, p.subject_id, p.unit, predictions, predictions)
-    }
-
-    val tsInterp_flat : DataFrame = Utils.flattenTimeseries(spark, tsInterpolated)
-    tsInterp_flat.
-      coalesce(1).
-      write.parquet(f"${tmp_data_dir}/labs_cohort_predict_${icd_code1}_${icd_code2}.parquet")
-    tsInterp_flat.
-      coalesce(1).
-      write.
-      format("com.databricks.spark.csv").
-      option("header", "true").
-      save(f"${tmp_data_dir}/labs_cohort_predict_${icd_code1}_${icd_code2}.csv")
 
     /*
     val labs_cohort_flat : DataFrame =
-      labs_cohort.flatMap { p: PatientEventSeries =>
+      labs_cohort.flatMap { p: PatientTimeSeries =>
         val ts = p.series.zip(p.warpedSeries)
         ts.map { case ((t, _), (tw, value)) =>
           (p.adm_id, p.item_id, p.subject_id, p.unit, t, tw, value) 
@@ -268,11 +294,11 @@ object Main {
       }.toDF("HADM_ID", "ITEMID", "SUBJECT_ID", "VALUEUOM", "CHARTTIME", "CHARTTIME_warped", "VALUENUM")
      */
 
-    if (false) {
 
-      /***********************************************************************
-       * Exploratory stuff
-       ***********************************************************************/
+    /***********************************************************************
+     * Exploratory stuff I don't use
+     ***********************************************************************/
+    if (false) {
 
       // To bypass:
       /*
@@ -309,12 +335,10 @@ object Main {
         dropDuplicates("ITEMID").
         join(d_labitems, "ITEMID").
         sort(desc("count")).
-        coalesce(1).
         write.
         parquet(f"${tmp_data_dir}/labs.parquet")
       // and then both labs & admissions:
       labs_good_df.
-        coalesce(1).
         write.
         parquet(f"${tmp_data_dir}/labs_and_admissions.parquet")
 
@@ -326,7 +350,6 @@ object Main {
         count.
         withColumnRenamed("count", "icd9_unique_count")
       icd9_per_pair.
-        coalesce(1).
         write.
         parquet(f"${tmp_data_dir}/icd9_per_pair.parquet")
 
@@ -343,7 +366,6 @@ object Main {
         sort(desc("adm_and_lab_count"))
       pairs_per_icd9.cache()
       pairs_per_icd9.
-        coalesce(1).
         write.
         parquet(f"${tmp_data_dir}/pairs_per_icd9.parquet")
 
@@ -357,7 +379,6 @@ object Main {
         sort(desc("adm_and_lab_count"))
       pairs_per_icd9_category.cache()
       pairs_per_icd9_category.
-        coalesce(1).
         write.
         parquet(f"${tmp_data_dir}/pairs_per_icd9_category.parquet")
     }
