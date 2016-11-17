@@ -124,8 +124,8 @@ object Main {
         // in the cohort (for just the selected lab items):
         val labs_cohort : RDD[PatientTimeSeries] = labs_cohort_df.rdd.
           map { row =>
-            val code1 = row.getAs[Boolean]("num_code1")
-            val code2 = row.getAs[Boolean]("num_code2")
+            val code1 = row.getAs[Long]("num_code1") > 0
+            val code2 = row.getAs[Long]("num_code2") > 0
             val k = (row.getAs[Int]("HADM_ID"),
               row.getAs[Int]("ITEMID"),
               row.getAs[Int]("SUBJECT_ID"),

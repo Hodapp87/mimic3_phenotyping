@@ -168,7 +168,7 @@ case object Utils {
     rdd.flatMap { p: PatientTimeSeries =>
       val ts = p.series.zip(p.warpedSeries)
       ts.map { case ((t, _), (tw, value)) =>
-        (p.adm_id, p.item_id, p.subject_id, p.unit, p.icd9category, tw, value)
+        (p.adm_id, p.item_id, p.subject_id, p.unit, p.icd9category, t, tw, value)
       }
     }.toDF("HADM_ID", "ITEMID", "SUBJECT_ID", "VALUEUOM", "ICD9_CATEGORY", "CHARTTIME", "CHARTTIME_warped", "VALUENUM")
   }
