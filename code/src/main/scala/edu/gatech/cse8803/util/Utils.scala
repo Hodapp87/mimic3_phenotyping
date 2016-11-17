@@ -181,5 +181,16 @@ case object Utils {
       }
     }.toDF("HADM_ID", "ITEMID", "SUBJECT_ID", "VALUEUOM", "ICD9_CATEGORY", "CHARTTIME_warped", "MEAN", "VARIANCE")
   }
-  
+
+  /** Return a DataFrameWriter to write a coalesced CSV, with header,
+    * overwriting old files if present. */
+  def csvOverwrite(df : DataFrame) : DataFrameWriter[Row] = {
+    df.
+      coalesce(1).
+      write.
+      mode(SaveMode.Overwrite).
+      format("com.databricks.spark.csv").
+      option("header", "true")
+  }
+
 }

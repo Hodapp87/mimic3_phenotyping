@@ -30,7 +30,7 @@ object Main {
     val tmp_data_dir : String = "file:///home/hodapp/source/bd4h-project/data-temp/"
     val mimic3_dir : String = "file:////mnt/dev/mimic3/"
 
-    val computeLabs = true
+    val computeLabs = false
     val optimizeHyperparams = false
     val regression = true
     // What is the minimum length (number of samples/events) in a
@@ -44,6 +44,10 @@ object Main {
 
     // ITEMID of the test we're interested in:
     val item_test = 50820
+
+    // For training & test split:
+    val randomSeed : Long = 0x12345
+    val trainRatio = 0.7
 
     // TODO: Perhaps pass the above in as commandline options
 
@@ -169,12 +173,7 @@ object Main {
           write.
           mode(SaveMode.Overwrite).
           parquet(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.parquet")
-        labs_cohort_flat.
-          coalesce(1).
-          write.
-          mode(SaveMode.Overwrite).
-          format("com.databricks.spark.csv").
-          option("header", "true").
+        Utils.csvOverwrite(labs_cohort_flat).
           save(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.csv")
         (diag_cohort, labs_cohort, labs_cohort_flat)
       } else {
@@ -185,6 +184,22 @@ object Main {
         val labs_cohort_flat = spark.read.parquet(f"${tmp_data_dir}/labs_cohort_${icd_code1}_${icd_code2}.parquet")
         (diag_cohort, labs_cohort, labs_cohort_flat)
       }
+
+    // Separate training & test:
+    val labs_cohort_split = labs_cohort.randomSplit(
+      Array(trainRatio, 1.0 - trainRatio), randomSeed)
+    val labs_cohort_train = labs_cohort_split(0)
+    val labs_cohort_test  = labs_cohort_split(1)
+
+    // Save training & test to disk (they'll be needed later):
+    if (computeLabs) {
+        val train_flat : DataFrame = Utils.flattenTimeseries(spark, labs_cohort_train)
+        Utils.csvOverwrite(train_flat).
+          save(f"${tmp_data_dir}/labs_cohort_train_${icd_code1}_${icd_code2}.csv")
+        val test_flat : DataFrame = Utils.flattenTimeseries(spark, labs_cohort_train)
+        Utils.csvOverwrite(test_flat).
+          save(f"${tmp_data_dir}/labs_cohort_test_${icd_code1}_${icd_code2}.csv")
+    }
 
     if (optimizeHyperparams) {
 
@@ -228,25 +243,19 @@ object Main {
       // function?
 
       // Quick hack to write the hyperparameters to disk:
-      sc.parallelize(Seq(optimal)).
+      val hyperDf = sc.parallelize(Seq(optimal)).
         map { case ((sig2, a, t), ll) => (sig2, a, t, ll, lab_min_series, item_test) }.
-        toDF("sigma2", "alpha", "tau", "log_likelihood", "lab_min_series", "item_test").
-        coalesce(1).
-        write.
-        mode(SaveMode.Overwrite).
-        format("com.databricks.spark.csv").
-        option("header", "true").
+        toDF("sigma2", "alpha", "tau", "log_likelihood", "lab_min_series", "item_test")
+
+      Utils.csvOverwrite(hyperDf).
         save(f"${tmp_data_dir}/hyperparams_${icd_code1}_${icd_code2}.csv")
-      
     }
 
     if (regression) {
-      // Regression example:
+      // Perform regression over training data:
       val sigma2 = 1.4
       val alpha = 0.1
       val tau = 3.55
-      val labs_cohort_split = labs_cohort.randomSplit(Array(0.7, 0.3), 0x12345)
-      val labs_cohort_train = labs_cohort_split(0)
       val gprModels = labs_cohort_train.map { p: PatientTimeSeries =>
         // Train a model for every time-series in training set:
         val t@(ll, matL, matA) = Utils.gprTrain(p.warpedSeries, sigma2, alpha, tau)
@@ -254,7 +263,10 @@ object Main {
         (p, matL, matA)
       }
       // gprModels then has (PatientTimeSeries, L matrix, A matrix) for
-      // every training time-series.
+      // every *training* time-series.
+
+      // Now, generate 'predicted' time-series over a sampling of the
+      // time range.
 
       // How many days before & after do we interpolate for?
       val padding = 5.0
@@ -275,28 +287,12 @@ object Main {
         write.
         mode(SaveMode.Overwrite).
         parquet(f"${tmp_data_dir}/labs_cohort_predict_${icd_code1}_${icd_code2}.parquet")
-      tsInterp_flat.
-        coalesce(1).
-        write.
-        mode(SaveMode.Overwrite).
-        format("com.databricks.spark.csv").
-        option("header", "true").
+      Utils.csvOverwrite(tsInterp_flat).
         save(f"${tmp_data_dir}/labs_cohort_predict_${icd_code1}_${icd_code2}.csv")
     }
 
-    /*
-    val labs_cohort_flat : DataFrame =
-      labs_cohort.flatMap { p: PatientTimeSeries =>
-        val ts = p.series.zip(p.warpedSeries)
-        ts.map { case ((t, _), (tw, value)) =>
-          (p.adm_id, p.item_id, p.subject_id, p.unit, t, tw, value) 
-        }
-      }.toDF("HADM_ID", "ITEMID", "SUBJECT_ID", "VALUEUOM", "CHARTTIME", "CHARTTIME_warped", "VALUENUM")
-     */
-
-
     /***********************************************************************
-     * Exploratory stuff I don't use
+     * Exploratory stuff I don't use right now
      ***********************************************************************/
     if (false) {
 
