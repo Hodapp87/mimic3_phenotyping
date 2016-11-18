@@ -76,44 +76,85 @@ patch_count = len(gr) * 3
 random_idx = numpy.random.choice(len(gr), patch_count, p = weights)
 
 # Make an array to hold all this:
-x_train = numpy.zeros((patch_count, patch_length * 2))
+x_data = numpy.zeros((patch_count, patch_length * 2))
+# Ordinarily I would put mean and variance in a 3rd dimension, but
+# Keras doesn't seem to actually allow multidimensional inputs in
+# 'Dense' despite saying that it does. Whatever.
+
 # Fill with (uniformly) random patches from the selected time-series:
 for (i,ts_idx) in enumerate(random_idx):
     ts = gr[ts_idx][1]
     start_idx = numpy.random.randint(num_patches[ts_idx])
     end_idx = start_idx + patch_length
     # First half is mean:
-    x_train[i, :patch_length] = ts["MEAN"].iloc[start_idx:end_idx]
+    x_data[i, :patch_length] = ts["MEAN"].iloc[start_idx:end_idx]
     # Second half is variance:
-    x_train[i, patch_length:] = ts["VARIANCE"].iloc[start_idx:end_idx]
+    x_data[i, patch_length:] = ts["VARIANCE"].iloc[start_idx:end_idx]
 
 #######################################################################
-# Autoencoder
+# Training/validation split
+#######################################################################
+# What ratio of the data to leave behind for validation
+validation_ratio = 0.4
+numpy.random.shuffle(x_data)
+split_idx = int(patch_count * validation_ratio)
+x_val, x_train = x_data[:split_idx,:], x_data[split_idx:,:]
+
+# TODO: Get labels
+
+#######################################################################
+# Stacked Autoencoder
 #######################################################################
 
 # Size of hidden layers:
 hidden1 = 100
 hidden2 = 100
 
-input_ts = Input(shape=(patch_length * 2,))
-encoded1 = Dense(hidden1,
-                 activation='sigmoid',
-                 activity_regularizer=activity_l1(0.1),
-                 W_regularizer=l2(0.01))(input_ts)
-encoded2 = Dense(hidden2,
-                 activation='sigmoid',
-                 activity_regularizer=activity_l1(0.1),
-                 W_regularizer=l2(0.01))(encoded1)
+# Input is size of one patch, with another dimension of size 2 (for
+# mean & variance)
+ts_shape = (patch_length * 2,)
 
-decoded1 = Dense(hidden1, activation='linear')(encoded2)
-decoded2 = Dense(patch_length * 2, activation='linear')(decoded1)
+# Make the first autoencoder and train it:
+input_ts = Input(shape=ts_shape)
+encoded = Dense(hidden1,
+                activation='sigmoid',
+                activity_regularizer=activity_l1(0.01),
+                W_regularizer=l2(0.01))
+encoded_ = encoded(input_ts)
+decoded = Dense(output_dim=patch_length * 2,
+                activation='linear')
+decoded_ = decoded(encoded_)
 
-autoencoder = Model(input=input_ts, output=decoded2)
+autoencoder = Model(input=input_ts, output=decoded_)
 autoencoder.compile(optimizer='adadelta', loss='mse')
 
 autoencoder.fit(x_train, x_train,
-                nb_epoch=50,
+                nb_epoch=100,
                 batch_size=256,
                 shuffle=True,
-                #validation_data=(x_test, x_test)
+                validation_data=(x_val, x_val)
                 )
+
+# Now prevent these layers from training:
+encoded_.trainable = False
+decoded_.trainable = False
+
+# Stack the 2nd autoencoder, using the 1st hidden layer as its input:
+encoded2 = Dense(hidden2,
+                 activation='sigmoid',
+                 activity_regularizer=activity_l1(0.01),
+                 W_regularizer=l2(0.01))
+encoded2_ = encoded2(encoded_)
+decoded2 = Dense(output_dim=patch_length * 2,
+                 activation='linear')
+decoded2_ = decoded2(encoded2_)
+
+autoencoder2 = Model(input=input_ts, output=decoded2_)
+autoencoder2.compile(optimizer='adadelta', loss='mse')
+
+autoencoder2.fit(x_train, x_train,
+                 nb_epoch=100,
+                 batch_size=256,
+                 shuffle=True,
+                 validation_data=(x_val, x_val)
+                 )
