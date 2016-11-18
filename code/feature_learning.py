@@ -126,45 +126,47 @@ ts_shape = (patch_length * 2,)
 input_ts = Input(shape=ts_shape)
 encoded = Dense(hidden1,
                 activation='sigmoid',
-                activity_regularizer=activity_l1(0.01),
-                W_regularizer=l2(0.01))
-encoded_ = encoded(input_ts)
+                activity_regularizer=activity_l1(0.0001),
+                W_regularizer=l2(0.0001)
+                )(input_ts)
 decoded = Dense(output_dim=patch_length * 2,
-                activation='linear')
-decoded_ = decoded(encoded_)
+                activation='linear')(encoded)
 
-autoencoder = Model(input=input_ts, output=decoded_)
+autoencoder = Model(input=input_ts, output=decoded)
 autoencoder.compile(optimizer='adadelta', loss='mse')
 
 autoencoder.fit(x_train, x_train,
-                nb_epoch=100,
+                nb_epoch=150,
                 batch_size=256,
                 shuffle=True,
                 validation_data=(x_val, x_val)
                 )
 
-# Now prevent these layers from training:
-encoded_.trainable = False
-decoded_.trainable = False
+# Learn primary features (from hidden layer of autoencoder):
+encoder1 = Model(input=input_ts, output=encoded)
+hidden_features_train = encoder1.predict(x_train)
+# Is this right?
+hidden_features_val = encoder1.predict(x_val)
 
-# Stack the 2nd autoencoder, using the 1st hidden layer as its input:
+# Make the 2nd autoencoder:
+input2 = Input(shape=(hidden1,))
 encoded2 = Dense(hidden2,
                  activation='sigmoid',
-                 activity_regularizer=activity_l1(0.01),
-                 W_regularizer=l2(0.01))
-encoded2_ = encoded2(encoded_)
+                 activity_regularizer=activity_l1(0.0001),
+                 W_regularizer=l2(0.0001))(input2)
 decoded2 = Dense(output_dim=patch_length * 2,
-                 activation='linear')
-decoded2_ = decoded2(encoded2_)
+                 activation='linear')(encoded2)
 
-autoencoder2 = Model(input=input_ts, output=decoded2_)
+autoencoder2 = Model(input=input2, output=decoded2)
 autoencoder2.compile(optimizer='adadelta', loss='mse')
 
-autoencoder2.fit(x_train, x_train,
+# Now, for input of the primary features (not raw data), it should
+# produce the training data:
+autoencoder2.fit(hidden_features_train, x_train,
                  nb_epoch=100,
                  batch_size=256,
                  shuffle=True,
-                 validation_data=(x_val, x_val)
+                 validation_data=(hidden_features_val, x_val)
                  )
 
 # TODO: Fine-tune to train entire network?
