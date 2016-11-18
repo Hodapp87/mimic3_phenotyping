@@ -47,11 +47,19 @@ if len(files) != 1:
 fname = os.path.join(input_path, files[0])
 print("Loading from %s..." % (fname,))
 df = pandas.read_csv(fname)
+
+# Standardize input to mean 0, variance 1 (to confuse matters a
+# little, the data that we're standardizing is itself mean and
+# variance of the Gaussian process)
+df["MEAN"]     = df["MEAN"]     - df["MEAN"].mean()
+df["VARIANCE"] = df["VARIANCE"] - df["VARIANCE"].mean()
+df["MEAN"]     = df["MEAN"]     / df["MEAN"].std()
+df["VARIANCE"] = df["VARIANCE"] / df["VARIANCE"].std()
+
 gr = list(df.groupby((df["HADM_ID"], df["ITEMID"], df["VALUEUOM"])))
 print("Got %d points (%d admissions)." % (len(df), len(gr)))
 
 # 'gr' then is a list of: ((HADM_ID, ITEMID, VALUEUOM), time-series dataframe)
-
 
 #######################################################################
 # Gathering patches
@@ -158,3 +166,5 @@ autoencoder2.fit(x_train, x_train,
                  shuffle=True,
                  validation_data=(x_val, x_val)
                  )
+
+# TODO: Fine-tune to train entire network?
