@@ -99,6 +99,8 @@ for (i,ts_idx) in enumerate(random_idx):
     # Second half is variance:
     x_data[i, patch_length:] = ts["VARIANCE"].iloc[start_idx:end_idx]
 
+print("Sampled %d patches of data" % (len(x_data),))
+
 #######################################################################
 # Training/validation split
 #######################################################################
@@ -107,6 +109,8 @@ validation_ratio = 0.4
 numpy.random.shuffle(x_data)
 split_idx = int(patch_count * validation_ratio)
 x_val, x_train = x_data[:split_idx,:], x_data[split_idx:,:]
+print("Split r=%g: %d patches for training, %d for validation" %
+      (validation_ratio, len(x_val), len(x_train)))
 
 # TODO: Get labels
 
@@ -122,51 +126,77 @@ hidden2 = 100
 # mean & variance)
 ts_shape = (patch_length * 2,)
 
-# Make the first autoencoder and train it:
-input_ts = Input(shape=ts_shape)
-encoded = Dense(hidden1,
-                activation='sigmoid',
-                activity_regularizer=activity_l1(0.0001),
-                W_regularizer=l2(0.0001)
-                )(input_ts)
-decoded = Dense(output_dim=patch_length * 2,
-                activation='linear')(encoded)
+raw_input_tensor = Input(shape=ts_shape)
+encode1_layer = Dense(hidden1,
+                      activation='sigmoid',
+                      activity_regularizer=activity_l1(0.0001),
+                      W_regularizer=l2(0.0001))
+encode1_tensor = encode1_layer(raw_input_tensor)
 
-autoencoder = Model(input=input_ts, output=decoded)
-autoencoder.compile(optimizer='adadelta', loss='mse')
+decode1_layer = Dense(output_dim=patch_length * 2,
+                      activation='linear')
+decode1_tensor = decode1_layer(encode1_tensor)
 
-autoencoder.fit(x_train, x_train,
-                nb_epoch=150,
-                batch_size=256,
-                shuffle=True,
-                validation_data=(x_val, x_val)
-                )
+# First model is input -> encode1 -> decode1:
+autoencoder1 = Model(input=raw_input_tensor, output=decode1_tensor)
+autoencoder1.compile(optimizer='adadelta', loss='mse')
 
-# Learn primary features (from hidden layer of autoencoder):
-encoder1 = Model(input=input_ts, output=encoded)
-hidden_features_train = encoder1.predict(x_train)
-# Is this right?
-hidden_features_val = encoder1.predict(x_val)
+# We also need input -> encode1 in order to get the primary features:
+encoder1 = Model(input=raw_input_tensor, output=encode1_tensor)
 
-# Make the 2nd autoencoder:
-input2 = Input(shape=(hidden1,))
-encoded2 = Dense(hidden2,
-                 activation='sigmoid',
-                 activity_regularizer=activity_l1(0.0001),
-                 W_regularizer=l2(0.0001))(input2)
-decoded2 = Dense(output_dim=patch_length * 2,
-                 activation='linear')(encoded2)
+# Stack the 2nd autoencoder (connecting to encode1):
+encode2_layer = Dense(hidden2,
+                      activation='sigmoid',
+                      activity_regularizer=activity_l1(0.0001),
+                      W_regularizer=l2(0.0001))
+encode2_tensor = encode2_layer(encode1_tensor)
+# We connect another input to the encoding layer so that we can pass
+# in the primary features:
+prim_feat_tensor = Input(shape=(hidden1,))
+encode2_tensor2 = encode2_layer(prim_feat_tensor)
 
-autoencoder2 = Model(input=input2, output=decoded2)
+decode2_layer = Dense(output_dim=patch_length * 2,
+                      activation='linear')
+decode2_tensor = decode1_layer(encode2_tensor)
+decode2_tensor2 = decode1_layer(encode2_tensor2)
+
+# Then we need primary_feature -> encode1 -> encode2 -> decode2:
+autoencoder2 = Model(input=prim_feat_tensor, output=decode2_tensor2)
 autoencoder2.compile(optimizer='adadelta', loss='mse')
 
-# Now, for input of the primary features (not raw data), it should
-# produce the training data:
-autoencoder2.fit(hidden_features_train, x_train,
+# Finally, greedy layer-wise training.
+
+# Train first autoencoder on raw input.
+autoencoder1.fit(x_train, x_train,
+                 nb_epoch=150,
+                 batch_size=256,
+                 shuffle=True,
+                 validation_data=(x_val, x_val))
+
+# Transform raw input into primary features.
+encoder1 = Model(input=raw_input_tensor, output=encode1_tensor)
+prim_feat_train = encoder1.predict(x_train)
+# Is this right?
+prim_feat_val = encoder1.predict(x_val)
+
+# Train second autoencoder on the primary features (which should
+# produce the raw input at the decoder):
+autoencoder2.fit(prim_feat_train, x_train,
                  nb_epoch=100,
                  batch_size=256,
                  shuffle=True,
-                 validation_data=(hidden_features_val, x_val)
+                 validation_data=(prim_feat_val, x_val)
                  )
+# theano.gof.fg.MissingInputError: ("An input of the graph, used to
+# compute dot(input_1, HostFromGpu.0), was not provided and not given
+# a value.Use the Theano flag exception_verbosity='high',for more
+# information on this error.", input_1)
 
-# TODO: Fine-tune to train entire network?
+# Finally, fine-tune stacked autoencoder on raw inputs:
+sae = Model(input=raw_input_tensor, output=decode2_tensor)
+sae.compile(optimizer='adadelta', loss='mse')
+sae.fit(x_train, x_train,
+        nb_epoch=100,
+        batch_size=256,
+        shuffle=True,
+        validation_data=(x_val, x_val))
