@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import os
 import pandas
@@ -141,31 +141,6 @@ decode1_tensor = decode1_layer(encode1_tensor)
 autoencoder1 = Model(input=raw_input_tensor, output=decode1_tensor)
 autoencoder1.compile(optimizer='adadelta', loss='mse')
 
-# We also need input -> encode1 in order to get the primary features:
-encoder1 = Model(input=raw_input_tensor, output=encode1_tensor)
-
-# Stack the 2nd autoencoder (connecting to encode1):
-encode2_layer = Dense(hidden2,
-                      activation='sigmoid',
-                      activity_regularizer=activity_l1(0.0001),
-                      W_regularizer=l2(0.0001))
-encode2_tensor = encode2_layer(encode1_tensor)
-# We connect another input to the encoding layer so that we can pass
-# in the primary features:
-prim_feat_tensor = Input(shape=(hidden1,))
-encode2_tensor2 = encode2_layer(prim_feat_tensor)
-
-decode2_layer = Dense(output_dim=patch_length * 2,
-                      activation='linear')
-decode2_tensor = decode1_layer(encode2_tensor)
-decode2_tensor2 = decode1_layer(encode2_tensor2)
-
-# Then we need primary_feature -> encode1 -> encode2 -> decode2:
-autoencoder2 = Model(input=prim_feat_tensor, output=decode2_tensor2)
-autoencoder2.compile(optimizer='adadelta', loss='mse')
-
-# Finally, greedy layer-wise training.
-
 # Train first autoencoder on raw input.
 autoencoder1.fit(x_train, x_train,
                  nb_epoch=150,
@@ -173,24 +148,35 @@ autoencoder1.fit(x_train, x_train,
                  shuffle=True,
                  validation_data=(x_val, x_val))
 
-# Transform raw input into primary features.
-encoder1 = Model(input=raw_input_tensor, output=encode1_tensor)
-prim_feat_train = encoder1.predict(x_train)
-# Is this right?
-prim_feat_val = encoder1.predict(x_val)
+# Stack the 2nd autoencoder (connecting to encode1):
+encode2_layer = Dense(hidden2,
+                      activation='sigmoid',
+                      activity_regularizer=activity_l1(0.0001),
+                      W_regularizer=l2(0.0001))
+encode2_tensor = encode2_layer(encode1_tensor)
 
-# Train second autoencoder on the primary features (which should
-# produce the raw input at the decoder):
-autoencoder2.fit(prim_feat_train, x_train,
+decode2_layer = Dense(output_dim=patch_length * 2,
+                      activation='linear')
+decode2_tensor = decode1_layer(encode2_tensor)
+
+# Then we need raw_input -> encode1 -> encode2 -> decode2, but with
+# some layers left out of training:
+autoencoder2 = Model(input=raw_input_tensor, output=decode2_tensor)
+encode1_layer.trainable = False
+# Probably superfluous:
+decode1_layer.trainable = False
+autoencoder2.compile(optimizer='adadelta', loss='mse')
+
+# Train second autoencoder.  We're basically training it on primary
+# hidden features, not raw input, because we're keeping the first
+# encoder's weights constant (hence 'trainable = False' above) and so
+# it is simply feeding encoded input in.
+autoencoder2.fit(x_train, x_train,
                  nb_epoch=100,
                  batch_size=256,
                  shuffle=True,
-                 validation_data=(prim_feat_val, x_val)
+                 validation_data=(x_val, x_val)
                  )
-# theano.gof.fg.MissingInputError: ("An input of the graph, used to
-# compute dot(input_1, HostFromGpu.0), was not provided and not given
-# a value.Use the Theano flag exception_verbosity='high',for more
-# information on this error.", input_1)
 
 # Finally, fine-tune stacked autoencoder on raw inputs:
 sae = Model(input=raw_input_tensor, output=decode2_tensor)
@@ -200,3 +186,6 @@ sae.fit(x_train, x_train,
         batch_size=256,
         shuffle=True,
         validation_data=(x_val, x_val))
+
+# Then, here is our model which provides 2nd hidden layer features:
+stacked_encoder = Model(input=raw_input_tensor, output=encode2_tensor)
