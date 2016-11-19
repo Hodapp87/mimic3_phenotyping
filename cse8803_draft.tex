@@ -369,9 +369,7 @@
 % not capitalized unless they are the first or last word of the title.
 % Linebreaks \\ can be used within to get better formatting as desired.
 % Do not put math or special symbols in the title.
-\title{CSE8803 Project Proposal:
-  Unsupervised Learning for Computational Phenotyping
-}
+\title{Unsupervised Learning for Computational Phenotyping}
 
 % TODO: Another project title?
 
@@ -413,11 +411,13 @@ phenotypes, as seems to be the case with asthma and heart
 disease. Some recent papers cite successes instead using unsupervised
 learning.  This shows great potential for finding patterns in
 Electronic Health Records that would otherwise be hidden and that can
-lead to greater understanding of conditions and treatments. My goal is
-to implement this (particularly, the methods from Lasko \emph{et
-  al.}\cite{Lasko2013}) in Hadoop/Spark and more generally on the
-laboratory results in MIMIC-III.
+lead to greater understanding of conditions and treatments. This work
+implements a method derived strongly from Lasko \emph{et
+  al.}\cite{Lasko2013} in Apache Spark and Python, but with its
+operation generalized to laboratory results in MIMIC-III.  It will be
+released as an open-source tool for exploration and visualization.
 \end{abstract}
+% TODO: Turn 'will be' to 'is' and actually release it.
 
 % Note that keywords are not normally used for peerreview papers.
 \begin{IEEEkeywords}
@@ -434,9 +434,7 @@ Unsupervised learning, Computational phenotyping
 % creates the second title. It will be ignored for other modes.
 % \IEEEpeerreviewmaketitle
 
-% N.B. Cite at least 8 papers!
-
-\section{Introduction}
+\section{Introduction \& Background}
 
 With large volumes of health care data comes the research area of
 \emph{computational phenotyping}\cite{Che2015}, making use of
@@ -478,15 +476,41 @@ too, deep learning succeeds more here at finding latent factors and
 extracting concepts.  Rather than transforming input data with
 Gaussian process regression, this work uses an unsupervised stacked
 denoising autoencoder (SDAE).
+% ``this work'' above is ambiguous.  It refers to Che2015, not *this*
+% work.
 
 \section{Problem Formulation}
 
-My goal in this project is to apply similar methology as in
-\cite{Lasko2013,Che2015}, but apply it more generally to various
+% What problem actually is this?
+
+The main goal undertaken here was to reimplement a combination of some
+earlier results using freely available big data platforms
+(particularly, Apache Spark), and from this, produce a more general,
+open-source tool.
+
+% TODO: Reword that.
+
+\section{Approach and Implementation}
+
+% Differences from original paper?
+
+This work was implemented primarily in Apache Spark using the
+MIMIC-III dataset\cite{Johnson2016a}.  The autoencoders and were
+implemented in Python via Keras \& Theano, and visualization via
+matplotlib.
+
+The most time-consuming computation was found to be hyperparameter
+optimization prior to the Gaussian Process Regression step
+\emph{(TODO: Give numbers)}.  However, this step also is amenable to
+the distributed nature of Apache Spark as it consists mainly of
+computations that can be run parallel.
+
+% Old detritus to recycle:
+
+In this project, I applied similar methodology as in
+\cite{Lasko2013,Che2015,Marlin}, but more generally to other
 laboratory measurements (i.e. \texttt{LABEVENTS} table) available in
-MIMIC-III\cite{Johnson2016a}.  As \cite{Marlin} handles ICU data, its
-treatment of data may be more relevant to MIMIC-III, so I may make use
-of techniques from there as well.
+MIMIC-III\cite{Johnson2016a}.
 
 From these laboratory measurements and that methodology, I aim to
 produce a transformation to a reduced feature space using a
@@ -504,30 +528,42 @@ and visualizations (perhaps with
 \href{https://lvdmaaten.github.io/tsne/}{t-SNE}) of the reduced
 feature space representation.
 
-\section{Approach and Implementation}
-
-% Differences from original paper?
-
-I am aiming to implement this work in Apache Spark or Hadoop, perhaps
-running on clusters with Amazon EC2 and AWS.  To implement the
-autoencoders, I will probably make use of some deep learning framework
-such as \href{https://www.tensorflow.org/}{TensorFlow} or
-\href{http://caffe.berkeleyvision.org/}{caffe} via
-\href{https://github.com/yahoo/CaffeOnSpark}{CaffeOnSpark}.  If I use
-Gaussian process regression, I may make use of
-\texttt{GaussianProcessRegressor} in the
-\href{http://scikit-learn.org/stable/modules/gaussian_process.html}{scikit-learn}
-library, or the \href{https://github.com/jbencook/SparkGP}{SparkGP}
-library.
-
 \section{Experimental Evaluation}
+
+% Need visualizations!
 
 \section{Conclusion}
 
-% use section* for acknowledgment
+This work is still in need of further experimentation and refining.
+The code is intended to be released as an open-source tool that allows
+exploration in MIMIC-III data but could easily be generalized to other
+time-series data.
+
+It also has some viable areas for further exploration.  One
+incremental change is in the use of multiple-task Gaussian processes
+(MTGPs); the work in Lasko handles only single time-series, while
+MIMIC-III is rich in parallel time-series that correlate with each
+other.  Other work has explored the use of MTGPs, but I am unaware of
+work which subsequently performed feature learning as in Lasko.
+Another incremental change is in the use of Variational Autoencoders
+(VAEs) to learn a feature space that is sufficiently low-dimensional
+that techniques such as t-SNE are not required for effective
+visualization.
+
+A more extensive change could involve using recurrent neural networks
+(RNNs) to more directly handle time-series \emph{(TODO: cite
+  sequence-to-sequence learning data; 'unreasonable effectiveness'
+  page)}.  While RNNs are ordinarily used for supervised learning,
+they could similarly be treated as autoencoders.  This approach would
+avoid some of the need to perform Gaussian Process Regression,
+however, it still may not cope well with time-series data that is very
+irregular.
+
 \section*{Acknowledgment}
 Thank you to Dr. Jimeng Sun and the TAs for their time and effort in
 this course.
+
+% TODO check that I cite at least 8 papers!
 
 \bibliography{cse8803_proposal}
 \bibliographystyle{abbrv}
