@@ -537,7 +537,10 @@ feature space representation.
 This work is still in need of further experimentation and refining.
 The code is intended to be released as an open-source tool that allows
 exploration in MIMIC-III data but could easily be generalized to other
-time-series data.
+time-series data, however, the code is not yet released.  Several
+optimizations also may help; for instance, hyperparameter optimization
+is currently done with a grid search, but would more sensibly done
+with a more intelligent optimization algorithm (such as SGD).
 
 It also has some viable areas for further exploration.  One
 incremental change is in the use of multiple-task Gaussian processes
