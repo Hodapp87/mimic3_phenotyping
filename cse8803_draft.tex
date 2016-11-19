@@ -481,16 +481,27 @@ denoising autoencoder (SDAE).
 
 \section{Problem Formulation}
 
-% What problem actually is this?
+% What problem actually is this?  Basically: What belongs here that
+% doesn't belong in the introduction?
 
-The main goal undertaken here was to reimplement a combination of some
-earlier results using freely available big data platforms
-(particularly, Apache Spark), and from this, produce a more general,
-open-source tool.
+The main goal undertaken here is to reimplement a combination of some
+earlier results using a freely available big data platform
+(particularly, Apache Spark) and a freely available clinical dataset
+(in this case, MIMIC-III).  The software behind this work is intended
+to be released as an open source tool for accomodating exploration,
+analysis, and visualization using the techniques described herein.
+
+While implementations of algorithms described in other papers are
+readily available in existing machine learning libraries for languages
+such as MATLAB or R, these are not as readily available using the
+abstractions in Apache Spark.
 
 % TODO: Reword that.
 
 \section{Approach and Implementation}
+
+% TODO: What do I even do with the data?  Go into technical details
+% here, both mathematical and infrastructure/programming
 
 % Differences from original paper?
 
@@ -541,6 +552,13 @@ time-series data, however, the code is not yet released.  Several
 optimizations also may help; for instance, hyperparameter optimization
 is currently done with a grid search, but would more sensibly done
 with a more intelligent optimization algorithm (such as SGD).
+
+I had intended that as much as possible could be executed within
+Apache Spark on a ``standard'' Spark setup such as Amazon EMR.  This
+still leaves most Java or JVM-compatible libraries as options thanks
+to Spark's integration with existing JVM infrastructure.  However,
+problems prevented this from being fully realized.  The autoencoder
+implementation could possibly be migrated to DL4J.
 
 It also has some viable areas for further exploration.  One
 incremental change is in the use of multiple-task Gaussian processes
