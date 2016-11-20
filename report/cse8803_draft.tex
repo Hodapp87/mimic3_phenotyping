@@ -683,11 +683,47 @@ Specifically, Keras was used with
 as the backend, however, it should work identically using
 \href{https://www.tensorflow.org/}{TensorFlow} as the backend.
 
-% TODO:
-% - The use of 'patches' and their sampling
-% - How many patches?  How frequent?
-% - Validation
-% - Specific Keras architecture (and diagram?)
+These autoencoders have a fixed-size input and output, and in order to
+accomodate this, fixed-size contiguous patches were sampled from the
+interpolated time-series.  As in \cite{Lasko2013}, the patch size was
+set to twice the padding (thus 30 samples here), and patches were
+sampled uniformly randomly from all contiguous patches.  A total of
+18,801 patches were produced here, all of which were then standardized
+to mean 0 and variance 1.  70\% of these patches were then selected
+for autoencoder training, and the remaining 30\% for validation.
+
+To accomodate this patch size, the autoencoder's input and output
+layers had 60 units (as each sample contained both variance and mean).
+
+As in \cite{Lasko2013}, the encoder and decoder layers used sigmoid
+encoders and linear decoders, and all hidden layers had 100 units.
+The sparsity and regularization parameters given there did not
+correspond precisely with Keras' model, so instead L1 activity
+regularization of $10^{-4}$ and L2 weight regularization of $10^{-4}$
+were used.
+
+In order to perform greedy layerwise training\cite{Ng}, the network
+was then built up in stages, starting first with this:
+
+\includegraphics[width=0.7\linewidth]{keras_autoencoder1.png}
+
+This model was trained with the raw input data (at both the input and
+the output), thus learning ``primary'' hidden features at the layer
+\texttt{encode1}.  The first decoder layer \texttt{decode1} was then
+discarded and the model extended with another encoder and decoder:
+
+\includegraphics[width=0.7\linewidth]{keras_autoencoder2.png}
+
+This model then was similarly trained on raw input data, but while
+keeping the weights in layer \texttt{encode1} constant.  That is, only
+layers \texttt{encode1} and \texttt{decode2} were trained, and in
+effect they were trained on ``primary'' hidden features
+(i.e. \texttt{encode1}'s activations on raw input).  Following this
+was ``fine-tuning''\cite{Ng} which optimized all layers, i.e. the
+stacked autoencoder as a whole, again using the raw input data.
+
+The final model then discarded layer \texttt{decode2}, and used the
+activations of layer \texttt{encode2} as the learned sparse features.
 
 % From these laboratory measurements and that methodology, I aim to
 % produce a transformation to a reduced feature space using a
