@@ -412,8 +412,8 @@ disease. Some recent papers cite successes instead using unsupervised
 learning.  This shows great potential for finding patterns in
 Electronic Health Records that would otherwise be hidden and that can
 lead to greater understanding of conditions and treatments. This work
-implements a method derived strongly from Lasko \emph{et al.} in
-Apache Spark and Python, but with its operation generalized to
+implements a method derived strongly from Lasko \emph{et al.}, but
+implements it in Apache Spark and Python and generalizes it to
 laboratory time-series data in MIMIC-III.  It will be released as an
 open-source tool for exploration, analysis, and visualization.
 \end{abstract}
@@ -440,9 +440,8 @@ The field of \emph{computational phenotyping}\cite{Che2015} has
 emerged recently as a way of learning more from the increasing volumes
 of Electronic Health Records available, and the volume of this data
 ties it in naturally with fields like machine learning and data
-mining.  Lasko \emph{et al.}\cite{Lasko2013} notes two limitations in
-the ``traditional'' approach of using supervised learning over
-specific information that a domain expert must supply:
+mining.  The ``traditional'' approach of supervised learning over
+classifications has two noted 
 
 \begin{itemize}
 \item{It requires the time and attention of that domain expert in
@@ -452,20 +451,20 @@ specific information that a domain expert must supply:
 \item{It tends to limit the patterns that can be found to what
   existing classifications acknowledge.  If a disease treated as a
   single condition really has multiple subtypes with different
-  phenotypes, the model will not reflect this. Lasko \emph{et
-    al.}\cite{Lasko2013} cites asthma and heart disease as examples of
-  this.}
+  phenotypes, the model will not reflect this - for instance, asthma
+  and heart disease\cite{Lasko2013}.}
 \end{itemize}
 
-Some recent papers (\cite{Marlin,Lasko2013,Johnson2016}) cite
+Some recent papers\cite{Marlin,Lasko2013,Johnson2016} cite
 successes with approaches instead using unsupervised learning on
-time-series data.  In \cite{Lasko2013}, such an approach applied to
-serum uric acid measurements was able to distinguish gout and acute
-leukemia with no prior classifications given in training.  Marlin
-\emph{et al.}\cite{Marlin} examines 13 physiological measures from a
-pediatric ICU (such as pulse oximetric saturation, heart rate, and
-respiratory rate). Che \emph{et al.}\cite{Che2015} likewise uses ICU
-data, but focuses on certain ICD-9 codes rather than mortality.
+time-series data.  In Lasko \emph{et al.}\cite{Lasko2013}, such an
+approach applied to serum uric acid measurements was able to
+distinguish gout and acute leukemia with no prior classifications
+given in training.  Marlin \emph{et al.}\cite{Marlin} examines 13
+physiological measures from a pediatric ICU (such as pulse oximetric
+saturation, heart rate, and respiratory rate). Che \emph{et
+  al.}\cite{Che2015} likewise uses ICU data, but focuses on certain
+ICD-9 codes rather than mortality.
 
 This approach still has technical barriers.  Time-series in healthcare
 data frequently are noisy, spare, heterogeneous, or irregularly
@@ -482,11 +481,12 @@ forward or backward.
 Che \emph{et al.}\cite{Che2015} notes that ``shallow'' clustering
 models such as Gaussian mixture models (as in \cite{Marlin}) are used
 too, deep learning succeeds more here at finding latent factors and
-extracting concepts.  Lasko \emph{et al.}\cite{Lasko2013} applies a
-two-layer stacked sparse autoencoder (compared with a five-layer
-stacked denoising autoencoder in \cite{Che2015}), but the approach
-that looks like it could extend to a deep learner with the addition of
-layers.
+extracting concepts - which is particularly important given the
+complexity of bodies and processes.  Lasko \emph{et
+  al.}\cite{Lasko2013} applies a two-layer stacked sparse autoencoder
+(compared with a five-layer stacked denoising autoencoder in
+\cite{Che2015}), but the approach that looks like it could extend to a
+deep learner with the addition of layers.
 
 \section{Problem Formulation}
 
@@ -550,6 +550,10 @@ least one ICD-9 code 584 (acute renal failure), but not both.  (This
 combination of tests and codes was not chosen for any particular
 reason except that the dataset was able to accomodate it.)
 
+All processing at this stage was done via Spark's DataFrame
+operations, aside from the final conversion to an RDD containing
+individual time-series.
+
 This produced a total of 9,035 unique admissions, 8,219 unique
 subjects, and 187,374 time-stamped samples.  70\% of these admissions
 were randomly selected for the training set, and the remaining 30\%
@@ -559,12 +563,25 @@ for the testing set.
 
 \subsubsection{Time Warping}
 
-% TODO: Give equation
+The covariance function that is used in Gaussian process regression
+(and explained after this section) contains a time-scale parameter
+$\tau$ which embeds assumptions on how closely correlated nearby
+samples are in time.  This value is assumed not to change within the
+time-series - that is, it is assumed to be
+\textit{stationary}\cite{Lasko2013}.  This assumption is often
+incorrect, but under the assumption that more rapidly-varying things
+(that is, shorter time-scale) are measured more frequently, an
+approximation can be applied to try to make the time-series more
+stationary - in the form of changing the distance in time between
+every pair of adjacent samples in order to shorten longer distances,
+but lengthen shorter ones\cite{Lasko2013}.  For original distance $d$,
+the warped distance is $d'=d^{1/3}+b$, using $a=3, b=0$ (these
+values were taken directly from equation 5 of \cite{Lasko2013} and not
+tuned further).
 
-Thomas Lasko also related in an email that the method described here
-was an approximation assuming that measurement frequency was
-proportional to how volatile the thing being measured is, and that
-this assumption is not true for all medical tests.  He referred to
+Thomas Lasko also related in an email that this assumption (that
+measurement frequency was proportional to how volatile the thing being
+measured is) is not true for all medical tests.  He referred to
 another paper of his\cite{Lasko2015} for a more robust approach,
 however, this is not used here.
 
@@ -577,14 +594,10 @@ used.  The method used here was precisely what was described in Lasko
 described in algorithm 2.1 of Rasmussen \&
 Williams\cite{Rasmussen2004}.
 
-
-
 % TODO: Hyperparameter optimization
+% TODO: Algorithm, covariance
 
 \subsection{Feature Selection with Autoencoder}
-
-% TODO: What do I even do with the data?  Go into technical details
-% here, both mathematical and infrastructure/programming
 
 % Differences from original paper?
 
