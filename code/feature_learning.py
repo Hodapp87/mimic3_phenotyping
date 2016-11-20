@@ -110,7 +110,7 @@ print("Sampled %d patches of data" % (len(x_data),))
 # Training/validation split
 #######################################################################
 # What ratio of the data to leave behind for validation
-validation_ratio = 0.3
+validation_ratio = 0.2
 numpy.random.shuffle(x_data)
 split_idx = int(patch_count * validation_ratio)
 x_val, x_train = x_data[:split_idx,:], x_data[split_idx:,:]
@@ -135,7 +135,7 @@ raw_input_tensor = Input(shape=ts_shape, name="raw_input")
 encode1_layer = Dense(hidden1,
                       activation='sigmoid',
                       activity_regularizer=activity_l1(0.001),
-                      W_regularizer=l2(0.0001),
+                      W_regularizer=l2(0.00001),
                       name="encode1")
 encode1_tensor = encode1_layer(raw_input_tensor)
 
@@ -151,7 +151,7 @@ plot(autoencoder1, to_file='keras_autoencoder1.png', show_shapes=True)
 
 # Train first autoencoder on raw input.
 autoencoder1.fit(x_train, x_train,
-                 nb_epoch=150,
+                 nb_epoch=300,
                  batch_size=256,
                  shuffle=True,
                  validation_data=(x_val, x_val))
@@ -160,7 +160,7 @@ autoencoder1.fit(x_train, x_train,
 encode2_layer = Dense(hidden2,
                       activation='sigmoid',
                       activity_regularizer=activity_l1(0.001),
-                      W_regularizer=l2(0.0001),
+                      W_regularizer=l2(0.00001),
                       name="encode2")
 encode2_tensor = encode2_layer(encode1_tensor)
 
@@ -194,7 +194,7 @@ sae = Model(input=raw_input_tensor, output=decode2_tensor)
 sae.compile(optimizer='adadelta', loss='mse')
 plot(sae, to_file='keras_sae.png', show_shapes=True)
 sae.fit(x_train, x_train,
-        nb_epoch=100,
+        nb_epoch=400,
         batch_size=256,
         shuffle=True,
         validation_data=(x_val, x_val))
@@ -203,7 +203,7 @@ sae.fit(x_train, x_train,
 stacked_encoder = Model(input=raw_input_tensor, output=encode2_tensor)
 plot(stacked_encoder, to_file='keras_stacked_encoder.png', show_shapes=True)
 
-def plot_weights(weights):
+def plot_weights(weights, name):
     fig = plt.figure(figsize = (20,20))
     outer_grid = gridspec.GridSpec(10, 10, wspace=0.0, hspace=0.0)
     for i in range(100):
@@ -212,10 +212,11 @@ def plot_weights(weights):
         ax.set_xticks([])
         ax.set_yticks([])
         fig.add_subplot(ax)
-    plt.savefig("keras_1st_layer.pdf", bbox_inches='tight')
-    plt.savefig("keras_1st_layer.png", bbox_inches='tight')
+    plt.savefig("%s.pdf" % (name,), bbox_inches='tight')
+    plt.savefig("%s.png" % (name,), bbox_inches='tight')
     plt.tight_layout()
     plt.close()
     
 # Get means from 1st-layer weights:
-plot_weights(encode1_layer.get_weights()[0][:30,:])
+plot_weights(encode1_layer.get_weights()[0][:30,:], "keras_1st_layer")
+
