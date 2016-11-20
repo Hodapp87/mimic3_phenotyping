@@ -508,6 +508,9 @@ runs on top of Java/JVM infrastructure and has access to a
 considerable ecosystem of Java-based, relevant libraries do not always
 exist or do not exist in a form which works well with Spark.
 
+% TODO: Mention integration with other languages via SparkR, PySpark,
+% Java APIs?
+
 The main problems that the implementation tries to address within
 these parameters are:
 
@@ -680,6 +683,12 @@ Specifically, Keras was used with
 as the backend, however, it should work identically using
 \href{https://www.tensorflow.org/}{TensorFlow} as the backend.
 
+% TODO:
+% - The use of 'patches' and their sampling
+% - How many patches?  How frequent?
+% - Validation
+% - Specific Keras architecture (and diagram?)
+
 % From these laboratory measurements and that methodology, I aim to
 % produce a transformation to a reduced feature space using a
 % combination of Gaussian process regression to condition
@@ -692,7 +701,10 @@ as the backend, however, it should work identically using
 
 \section{Experimental Evaluation}
 
-% Need visualizations!
+Presently, not many results are available as further work is needed.
+
+% TODO (time permitting):
+% - Visualization of weights
 
 \section{Conclusions \& Further Work}
 
@@ -709,15 +721,19 @@ or more extensive changes\cite{Lasko2015} could be made to try to make
 the time-series more stationary.  Other covariance functions may be
 more appropriate as well.
 
-I had intended that as much as possible could be executed within
-Apache Spark on a ``standard'' Spark setup such as
-\href{https://aws.amazon.com/emr/}{Amazon Elastic MapReduce}.  This
-still leaves most Java or JVM-compatible libraries as options thanks
-to Spark's integration with existing JVM infrastructure.  However,
-problems prevented this from being fully realized.  The autoencoder
-implementation could possibly be migrated to DL4J.
+The intention was that as much as possible could be executed within
+Apache Spark on ``standard'' infrastructure such as
+\href{https://aws.amazon.com/emr/}{Amazon EMR} or
+\href{https://databricks.com/}{Databricks}.  The original intention
+was to use \href{https://deeplearning4j.org/}{DL4J}, a native Java
+library which already supports Apache Spark, but problems prevented
+this from working correctly.  It may be possible to still use DL4J,
+there may be other Java-compatible libraries accessible from Apache
+Spark, or a closer integration with Keras may be possible via Spark's
+built-in \texttt{pyspark} support (and performance may still be
+acceptable if GPU support is unavailable).
 
-It also has some viable areas for further exploration.  One
+Some other areas should perhaps be explored further too.  One
 incremental change is in the use of multiple-task Gaussian processes
 (MTGPs); the work done here handles only individual time-series, while
 MIMIC-III is rich in parallel time-series that correlate with each
