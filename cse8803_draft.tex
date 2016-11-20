@@ -525,7 +525,7 @@ these parameters are:
 
 \section{Approach and Implementation}
 
-\subsection{Loading \& Selecting Data}
+\subsection{Loading and Selecting Data}
 
 The MIMIC-III database is supplied as a collection of \texttt{.csv.gz}
 files (that is, comma-separated values, compressed with gzip).  By way
@@ -555,7 +555,31 @@ subjects, and 187,374 time-stamped samples.  70\% of these admissions
 were randomly selected for the training set, and the remaining 30\%
 for the testing set.
 
-\subsection{Preprocessing with Gaussian Process Regression}
+\subsection{Preprocessing}
+
+\subsubsection{Time Warping}
+
+% TODO: Give equation
+
+Thomas Lasko also related in an email that the method described here
+was an approximation assuming that measurement frequency was
+proportional to how volatile the thing being measured is, and that
+this assumption is not true for all medical tests.  He referred to
+another paper of his\cite{Lasko2015} for a more robust approach,
+however, this is not used here.
+
+\subsubsection{Gaussian Process Regression}
+
+In order to condition the time-series data from the prior step to
+address its irregularity and sparsity, Gaussian process regression was
+used.  The method used here was precisely what was described in Lasko
+\emph{et al.}\cite{Lasko2013} which itself is just the method
+described in algorithm 2.1 of Rasmussen \&
+Williams\cite{Rasmussen2004}.
+
+
+
+% TODO: Hyperparameter optimization
 
 \subsection{Feature Selection with Autoencoder}
 
@@ -602,7 +626,7 @@ feature space representation.
 
 % Need visualizations!
 
-\section{Conclusion}
+\section{Conclusions \& Further Work}
 
 This work is still in need of further experimentation and refining.
 The code is intended to be released as an open-source tool that allows
