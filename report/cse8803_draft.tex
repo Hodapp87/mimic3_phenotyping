@@ -725,11 +725,7 @@ stacked autoencoder as a whole, again using the raw input data.
 The final model then discarded layer \texttt{decode2}, and used the
 activations of layer \texttt{encode2} as the learned sparse features.
 
-An interesting detail which figure 2 of \cite{Lasko2013} shows is that
-the effects of the first layer (\texttt{encode1} here) can be
-visualized directly in the form of its weights.  As they form a 60x100
-array, each 60-element vector corresponds to a sort of time-series
-signature which that unit is detecting.
+% TODO: How many iterations?  What algorithms?  What settings?
 
 % From these laboratory measurements and that methodology, I aim to
 % produce a transformation to a reduced feature space using a
@@ -743,9 +739,20 @@ signature which that unit is detecting.
 
 \section{Experimental Evaluation}
 
-Presently, not many results are available as further work is needed.
-The resultant features from the autoencoder still need to be examined
-alongside their labels.
+An interesting detail which figure 2 of \cite{Lasko2013} shows is that
+the effects of the first layer (\texttt{encode1} here) can be
+visualized directly in the form of its weights.  As they form a 60x100
+array, each 60-element vector corresponds to a sort of time-series
+signature which that unit is detecting.  The below is one example
+(however, one that seems to suggest that the neural network still
+requires tuning, or that the input data is problematic):
+
+\includegraphics[width=\linewidth]{keras_1st_layer.png}
+
+Presently, not many other results are available as further work is
+needed.  The resultant features from the autoencoder still need to be
+examined alongside their labels, and some further clustering and
+visualization done on this.
 % TODO (time permitting):
 % - Visualization of weights
 
