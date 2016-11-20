@@ -412,11 +412,10 @@ disease. Some recent papers cite successes instead using unsupervised
 learning.  This shows great potential for finding patterns in
 Electronic Health Records that would otherwise be hidden and that can
 lead to greater understanding of conditions and treatments. This work
-implements a method derived strongly from Lasko \emph{et
-  al.}\cite{Lasko2013} in Apache Spark and Python, but with its
-operation generalized to laboratory time-series data in MIMIC-III.  It
-will be released as an open-source tool for exploration, analysis, and
-visualization.
+implements a method derived strongly from Lasko \emph{et al.} in
+Apache Spark and Python, but with its operation generalized to
+laboratory time-series data in MIMIC-III.  It will be released as an
+open-source tool for exploration, analysis, and visualization.
 \end{abstract}
 % TODO: Turn 'will be' to 'is' and actually release it.
 
@@ -471,41 +470,94 @@ data, but focuses on certain ICD-9 codes rather than mortality.
 This approach still has technical barriers.  Time-series in healthcare
 data frequently are noisy, spare, heterogeneous, or irregularly
 sampled, and commonly Gaussian processes are employed here in order to
-condition the data into a more useful form.  In \cite{Lasko2013},
-Gaussian process regression is used as a transformation step prior to
-a series of autoencoders used for deep learning, producing a
-continuous time-series which can be sampled regularly for mean and
-variance; in contrast, in \cite{Ghassemi2015} it is used to instead
-derive a latent representation from correlated time-series.  While
-\cite{Che2015} notes that ``shallow'' clustering models such as
-Gaussian mixture models (as in \cite{Marlin}) are used too, deep
-learning succeeds more here at finding latent factors and extracting
-concepts.
+condition the data into a more regular form as a pre-processing step.
+In \cite{Lasko2013}, Gaussian process regression produces a model
+which generates a continuous, interpolated time-series providing both
+predicted mean and variance.  In \cite{Ghassemi2015} it is used to
+instead derive a latent representation from correlated time-series.
+Che \emph{et al.}\cite{Che2015} does not use Gaussian process
+regression, but rather fills irregularities in the data by propagating
+forward or backward.
 
-% Rather than transforming input data with Gaussian process
-% regression, this work uses an unsupervised stacked denoising
-% autoencoder (SDAE).
+Che \emph{et al.}\cite{Che2015} notes that ``shallow'' clustering
+models such as Gaussian mixture models (as in \cite{Marlin}) are used
+too, deep learning succeeds more here at finding latent factors and
+extracting concepts.  Lasko \emph{et al.}\cite{Lasko2013} applies a
+two-layer stacked sparse autoencoder (compared with a five-layer
+stacked denoising autoencoder in \cite{Che2015}), but the approach
+that looks like it could extend to a deep learner with the addition of
+layers.
 
 \section{Problem Formulation}
 
-% What problem actually is this?  Basically: What belongs here that
-% doesn't belong in the introduction?
+The goal undertaken here is to reimplement a combination of some
+earlier results (focusing mainly on that of Lasko \emph{et
+  al.}\cite{Lasko2013}) using \href{http://spark.apache.org/}{Apache
+  Spark} and the MIMIC-III critical care database\cite{Johnson2016a},
+and able to run on a ``standard'' Spark setup such as
+\href{https://aws.amazon.com/emr/}{Amazon Elastic MapReduce}. The
+software behind this work is also intended to be released as an open
+source tool for accomodating exploration, analysis, and visualization
+using the techniques described herein.
 
-The main goal undertaken here is to reimplement a combination of some
-earlier results using a freely available big data platform
-(particularly, Apache Spark) and a freely available clinical dataset
-(in this case, MIMIC-III).  The software behind this work is intended
-to be released as an open source tool for accomodating exploration,
-analysis, and visualization using the techniques described herein.
+Most of the needed algorithms are available in existing machine
+learning libraries in languages such as MATLAB or R, however, these
+are less accessible to the aforementioned ``standard'' setup or may be
+more cumbersome to integrate with Apache Spark.  While Apache Spark
+runs on top of Java/JVM infrastructure and has access to a
+considerable ecosystem of Java-based, relevant libraries do not always
+exist or do not exist in a form which works well with Spark.
 
-While implementations of algorithms described in other papers are
-readily available in existing machine learning libraries for languages
-such as MATLAB or R, these are not as readily available using the
-abstractions in Apache Spark.
+The main problems that the implementation tries to address within
+these parameters are:
 
-% TODO: Reword that.
+\begin{itemize}
+\item{Loading the MIMIC-III database into a form usable from Spark}
+\item{Identifying relevant laboratory tests, admissions, and ICD-9
+  codes on which to focus}
+\item{Preprocessing the time-series data with Gaussian process
+  regression}
+\item{Using a two-layer stacked sparse autoencoder to perform feature
+  learning}
+\item{Visualizing the new feature space and identifying potential
+  clusters}
+\end{itemize}
 
 \section{Approach and Implementation}
+
+\subsection{Loading \& Selecting Data}
+
+The MIMIC-III database is supplied as a collection of \texttt{.csv.gz}
+files (that is, comma-separated values, compressed with gzip).  By way
+of \texttt{spack-csv}, Apache Spark 2.x is able to load these files
+natively as tabular data, i.e. a \texttt{DataFrame}.  All work
+described here used the following tables\cite{Johnson2016a}:
+
+\begin{itemize}
+\item \texttt{LABEVENTS}: Timestamped laboratory measurements for patients
+\item \texttt{DIAGNOSES\_ICD}: ICD-9 diagnoses for patients (per-admission)
+\item \texttt{D\_ICD\_DIAGNOSES}: Information on each ICD-9 diagnosis
+\item \texttt{D\_LABEVENTS}: Information on each type of laboratory event
+\end{itemize}
+
+% TODO: Mention LOINC code, 11558-4?
+
+From these the laboratory time-series for \texttt{ITEMID} of 50820
+(blood pH) were extracted, under the conditions that at least 3
+samples were available for a given admission, and that the admission
+involved at least one ICD-9 code 518 (other lung diseases), or at
+least one ICD-9 code 584 (acute renal failure), but not both.  (This
+combination of tests and codes was not chosen for any particular
+reason except that the dataset was able to accomodate it.)
+
+This produced a total of 9,035 unique admissions, 8,219 unique
+subjects, and 187,374 time-stamped samples.  70\% of these admissions
+were randomly selected for the training set, and the remaining 30\%
+for the testing set.
+
+\subsection{Preprocessing with Gaussian Process Regression}
+
+\subsection{Feature Selection with Autoencoder}
 
 % TODO: What do I even do with the data?  Go into technical details
 % here, both mathematical and infrastructure/programming
