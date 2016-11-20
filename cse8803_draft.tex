@@ -587,15 +587,58 @@ however, this is not used here.
 
 \subsubsection{Gaussian Process Regression}
 
-In order to condition the time-series data from the prior step to
-address its irregularity and sparsity, Gaussian process regression was
-used.  The method used here was precisely what was described in Lasko
-\emph{et al.}\cite{Lasko2013} which itself is just the method
-described in algorithm 2.1 of Rasmussen \&
+In order to condition the irregular and sparse time-series data from
+the prior step, Gaussian process regression was used.  The method used
+here is what Lasko \emph{et al.}\cite{Lasko2013} described, which in
+more depth is the method described in algorithm 2.1 of Rasmussen \&
 Williams\cite{Rasmussen2004}.
 
+In brief, Gaussian process regression (GPR) is a Bayesian
+non-parametric, or less parametric, method of supervised learning over
+noisy observations\cite{Ebden2015,Lasko2013,Rasmussen2004}.  It is not
+completely free-form, but it infers a function constrained only by the
+mean function (which here is assumed to be 0 and can be ignored) and
+the covariance function $k(t,t')$ of an underlying
+infinite-dimensional Gaussian distribution.  It is not exclusive to
+time-series data, but $t$ is used here as in this work GPR is done
+only on time-series data.
+
+That covariance function $k$ defines how dependent observations are on
+each other, and so a common choice is the squared
+exponential\cite{Ebden2015}:
+
+$$k(t,t') = \sigma_n^2\exp\bigg[\frac{-(t-t')^2}{2l^2}\bigg]$$
+
+Note that $k$ approaches a maximum of $\sigma_n^2$ as $t$ and $t'$ are
+further, and $k$ approaches a minimum of 0 as $t$ and $t'$ are closer.
+Intuitively, this makes sense for many ``natural'' functions: we
+expect closer $t$ values to have more strongly correlated function
+values, and $l$ defines the time scale of that correlation.
+
+The rational quadratic function is used here instead as it better
+models things that may occur on many time scales\cite{Lasko2013}:
+
+$$k(t,t') = \sigma_n^2\bigg[1+\frac{(t-t')^2}{2\alpha\tau^2}\bigg]^{-\alpha}$$
+
+Rasmussen \& Williams\cite{Rasmussen2004} supplies a formula for
+computing the log marginal likelihood of the target values
+$\mathbf{y}$ given the inputs $X$ (both $n\times1$ row vectors of
+target values and input values, respectively), where $K$ is a $n\times
+n$ matrix for which $K_{ij}=k(X_i,X_j)$:
+
+$$\log p(\mathbf{y}|X) = -\frac{1}{2}\mathbf{y}^\top(K+\sigma_n^2I)^{-1}-\frac{1}{2}\log |K+\sigma_n^2I|-\frac{n}{2}\log2\pi$$
+
+An equivalent version that uses Cholesky decomposition rather than
+$n\times n$ matrix inversion is given in algorithm 2.1 of the
+aforementioned text, and this is what is actually used in the code.
+
+In specific, in order to optimize the hyperparameters $\sigma_n$,
+$\tau$, and $\alpha$ of the covariance function, $\sum\log
+p(\mathbf{y}|X)$ was roughly maximized over every time-series in the
+training set using a grid search.  The values found for this were
+$\sigma_n=1.4$, $\alpha=0.1$, and $\tau=3.55$.
+
 % TODO: Hyperparameter optimization
-% TODO: Algorithm, covariance
 
 \subsection{Feature Selection with Autoencoder}
 
@@ -644,10 +687,15 @@ feature space representation.
 This work is still in need of further experimentation and refining.
 The code is intended to be released as an open-source tool that allows
 exploration in MIMIC-III data but could easily be generalized to other
-time-series data, however, the code is not yet released.  Several
-optimizations also may help; for instance, hyperparameter optimization
-is currently done with a grid search, but would more sensibly done
-with a more intelligent optimization algorithm (such as SGD).
+time-series data, however, the code is not yet released.
+
+Several optimizations also may help; for instance, hyperparameter
+optimization is currently done with a grid search, but would more
+sensibly done with a more intelligent optimization algorithm (such as
+SGD).  The time warping function has parameters that could be tuned,
+or more extensive changes\cite{Lasko2015} could be made to try to make
+the time-series more stationary.  Other covariance functions may be
+more appropriate as well.
 
 I had intended that as much as possible could be executed within
 Apache Spark on a ``standard'' Spark setup such as
