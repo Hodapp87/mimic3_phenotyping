@@ -641,6 +641,10 @@ training set (following the time warping of the prior section) using a
 grid search.  The values found for this were $\sigma_n=1.4$,
 $\alpha=0.1$, and $\tau=3.55$.
 
+Hyperparameter optimization was likely the most time-consuming step of
+processing.  However, this step also is a highly parallelizable one,
+and so it was amenable to the distributed nature of Apache Spark.
+
 \subsubsection{Interpolation}
 
 The remainder of algorithm 2.1 is not reproduced here, but the code
@@ -663,43 +667,28 @@ containing predicted mean and variance at the sampled times described
 above (a total of 341,819 interpolated time-series samples).  These
 interpolated time-series were then the input to later steps.
 
-\subsection{Feature Selection with Autoencoder}
+\subsection{Feature Learning with Autoencoder}
 
-% Differences from original paper?
+A stacked sparse 2-layer autoencoder was then used to perform feature
+learning.  The implementation used here was a combination of what was
+described in \cite{Lasko2013} (which closely follows the UFLDL
+Tutorial from Stanford\cite{Ng}), and Fran\c cois Chollet's
+guide\cite{Chollet} on using the Python library
+\href{https://keras.io/}{Keras} to implement autoencoders.
+Specifically, Keras was used with
+\href{http://deeplearning.net/software/theano/}{Theano} (GPU-enabled)
+as the backend, however, it should work identically using
+\href{https://www.tensorflow.org/}{TensorFlow} as the backend.
 
-This work was implemented primarily in Apache Spark using the
-MIMIC-III dataset\cite{Johnson2016a}.  The autoencoders and were
-implemented in Python via Keras \& Theano, and visualization via
-matplotlib.
-
-The most time-consuming computation was found to be hyperparameter
-optimization prior to the Gaussian Process Regression step
-\emph{(TODO: Give numbers)}.  However, this step also is amenable to
-the distributed nature of Apache Spark as it consists mainly of
-computations that can be run parallel.
-
-% Old detritus to recycle:
-
-In this project, I applied similar methodology as in
-\cite{Lasko2013,Che2015,Marlin}, but more generally to other
-laboratory measurements (i.e. \texttt{LABEVENTS} table) available in
-MIMIC-III\cite{Johnson2016a}.
-
-From these laboratory measurements and that methodology, I aim to
-produce a transformation to a reduced feature space using a
-combination of Gaussian process regression to condition
-irregularly-sampled input data and autoencoders to learn a
-reduced-dimension form of them.  Using labels such as certain ICD-9
-codes, I will train classifiers from the reduced form, and compute
-their AUCs for these codes.  I will also examine them for apparent
-clusterings that may suggest multiple different phenotypes for some
-label, as seen in \cite[figure 5]{Lasko2013}.
-
-The deliverables of this should include source code of the above, some
-form of trained models that may be applicable outside of MIMIC-III,
-and visualizations (perhaps with
-\href{https://lvdmaaten.github.io/tsne/}{t-SNE}) of the reduced
-feature space representation.
+% From these laboratory measurements and that methodology, I aim to
+% produce a transformation to a reduced feature space using a
+% combination of Gaussian process regression to condition
+% irregularly-sampled input data and autoencoders to learn a
+% reduced-dimension form of them.  Using labels such as certain ICD-9
+% codes, I will train classifiers from the reduced form, and compute
+% their AUCs for these codes.  I will also examine them for apparent
+% clusterings that may suggest multiple different phenotypes for some
+% label, as seen in \cite[figure 5]{Lasko2013}.
 
 \section{Experimental Evaluation}
 
@@ -757,7 +746,7 @@ that is very irregular.
 Thank you to Dr. Jimeng Sun and the TAs for their time and effort in
 this course.
 
-% TODO check that I cite at least 8 papers!
+% TODO Fix the URLs so that they display in the bibliography!
 
 \bibliography{cse8803_draft}
 \bibliographystyle{abbrv}
