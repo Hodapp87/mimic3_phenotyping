@@ -725,6 +725,12 @@ stacked autoencoder as a whole, again using the raw input data.
 The final model then discarded layer \texttt{decode2}, and used the
 activations of layer \texttt{encode2} as the learned sparse features.
 
+An interesting detail which figure 2 of \cite{Lasko2013} shows is that
+the effects of the first layer (\texttt{encode1} here) can be
+visualized directly in the form of its weights.  As they form a 60x100
+array, each 60-element vector corresponds to a sort of time-series
+signature which that unit is detecting.
+
 % From these laboratory measurements and that methodology, I aim to
 % produce a transformation to a reduced feature space using a
 % combination of Gaussian process regression to condition
@@ -738,7 +744,8 @@ activations of layer \texttt{encode2} as the learned sparse features.
 \section{Experimental Evaluation}
 
 Presently, not many results are available as further work is needed.
-
+The resultant features from the autoencoder still need to be examined
+alongside their labels.
 % TODO (time permitting):
 % - Visualization of weights
 
@@ -783,7 +790,7 @@ required for effective visualization.
 
 A more extensive change could involve using recurrent neural networks
 (RNNs).  Deep networks such as RNNs such as Long Short-Term Memories
-have shown promise in their ability to more directly handle
+(LSTMs) have shown promise in their ability to more directly handle
 sequences\cite{Sutskever2014} and clinical time-series data, including
 handling missing data\cite{Lipton2015, Lipton2015a, Lipton2016}.
 However, they are primarily used for supervised learning, but could
