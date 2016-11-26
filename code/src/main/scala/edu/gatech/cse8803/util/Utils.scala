@@ -1,8 +1,10 @@
+// (c) 2016 Chris Hodapp, chodapp3@gatech.edu
+
 package edu.gatech.cse8803.util
 
 import edu.gatech.cse8803.types._
 
-import breeze.linalg.{DenseVector => BDV, DenseMatrix => BDM, sum}
+import breeze.linalg.{DenseMatrix => BDM, sum}
 import breeze.linalg._
 import breeze.numerics._
 

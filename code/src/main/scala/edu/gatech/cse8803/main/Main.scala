@@ -1,3 +1,5 @@
+// (c) 2016 Chris Hodapp, chodapp3@gatech.edu
+
 package edu.gatech.cse8803.main
 
 import edu.gatech.cse8803.util.Utils
@@ -15,6 +17,10 @@ import java.sql.Timestamp
 
 object Main {
   def main(args: Array[String]): Unit = {
+
+    /***********************************************************************
+     * Boilerplate
+     ***********************************************************************/
     val spark = SparkSession.builder.
       // Can I just pass this in with spark-submit?
       //master("yarn").
@@ -23,13 +29,23 @@ object Main {
       getOrCreate()
     val sc = spark.sparkContext
     import spark.implicits._
+    import org.apache.log4j.Logger
+    import org.apache.log4j.Level
 
-    // Input data directories
+    Logger.getLogger("org").setLevel(Level.WARN)
+    Logger.getLogger("akka").setLevel(Level.WARN)
+
+    /***********************************************************************
+     * Input data directories
+     ***********************************************************************/
     //val tmp_data_dir : String = "s3://bd4h-mimic3/cohort_518_584_50820/"
     //val mimic3_dir : String = "s3://bd4h-mimic3/"
     val tmp_data_dir : String = "file:///home/hodapp/source/bd4h-project/data-temp/"
     val mimic3_dir : String = "file:////mnt/dev/mimic3/"
 
+    /***********************************************************************
+     * Run parameters
+     ***********************************************************************/
     val computeLabs = false
     val optimizeHyperparams = false
     val regression = true
@@ -51,11 +67,9 @@ object Main {
 
     // TODO: Perhaps pass the above in as commandline options
 
-    import org.apache.log4j.Logger
-    import org.apache.log4j.Level
-
-    Logger.getLogger("org").setLevel(Level.WARN)
-    Logger.getLogger("akka").setLevel(Level.WARN)
+    /***********************************************************************
+     * Loading & transforming data
+     ***********************************************************************/
 
     // These are small enough to cache:
     val d_icd_diagnoses = Utils.csv_from_s3(
@@ -201,6 +215,9 @@ object Main {
           save(f"${tmp_data_dir}/labs_cohort_test_${icd_code1}_${icd_code2}.csv")
     }
 
+    /***********************************************************************
+     * Hyperparameter optimization for GPR
+     ***********************************************************************/
     if (optimizeHyperparams) {
 
       // Hyperparameter optimization:
@@ -239,8 +256,7 @@ object Main {
           { case(_, t) => t },
           { (t1,t2) => if (t1._2 > t2._2) t1 else t2 }
         )
-      // Fucking Spark, would it kill you to provide an argmax/argmin
-      // function?
+      // Spark, would providing an argmax/argmin function kill you?
 
       // Quick hack to write the hyperparameters to disk:
       val hyperDf = sc.parallelize(Seq(optimal)).
@@ -251,6 +267,9 @@ object Main {
         save(f"${tmp_data_dir}/hyperparams_${icd_code1}_${icd_code2}.csv")
     }
 
+    /***********************************************************************
+     * Gaussian process regression
+     ***********************************************************************/
     if (regression) {
       // Perform regression over training data:
       val sigma2 = 1.4
@@ -383,7 +402,7 @@ object Main {
     }
   }
 
-
+  // Some scratch stuff I no longer use:
   /*
    val admissions = Utils.csv_from_s3("ADMISSIONS")
    val callout = Utils.csv_from_s3("CALLOUT")

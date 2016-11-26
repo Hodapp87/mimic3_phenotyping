@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 
+# (c) 2016 Chris Hodapp, chodapp3@gatech.edu
+
+import utils
+
 import os
 import pandas
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import numpy
 import math
-from itertools import product
 
 from keras.layers import Input, Dense, Lambda
 from keras.models import Model
@@ -23,14 +26,7 @@ from keras.utils.visualize_util import plot
 
 input_path = "../data-temp/labs_cohort_predict_518_584.csv"
 
-# Since Spark saves the CSV data by partition, we must still find the
-# single file in that path (we coalesced to one partition, but it's
-# still not a known filename):
-files = [d for d in os.listdir(input_path) if d.endswith(".csv")]
-if len(files) != 1:
-    raise Exception("Can't find single CSV file in %s" % (input_path,))
-
-fname = os.path.join(input_path, files[0])
+fname = utils.get_single_csv(input_path)
 print("Training: Loading from %s..." % (fname,))
 df = pandas.read_csv(fname)
 gr = list(df.groupby((df["HADM_ID"], df["ITEMID"], df["VALUEUOM"])))
@@ -212,6 +208,8 @@ def plot_weights(weights, name):
         ax.set_xticks([])
         ax.set_yticks([])
         fig.add_subplot(ax)
+    # Why didn't I do this?
+    #plt.savefig("%s.eps" % (name,), bbox_inches='tight')
     plt.savefig("%s.pdf" % (name,), bbox_inches='tight')
     plt.savefig("%s.png" % (name,), bbox_inches='tight')
     plt.tight_layout()

@@ -1,3 +1,5 @@
+// (c) 2016 Chris Hodapp, chodapp3@gatech.edu
+
 package edu.gatech.cse8803.types
 
 case class PatientTimeSeries(
