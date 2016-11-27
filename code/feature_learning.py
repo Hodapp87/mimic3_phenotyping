@@ -29,7 +29,8 @@ input_path = "../data-temp/labs_cohort_predict_518_584.csv"
 fname = utils.get_single_csv(input_path)
 print("Training: Loading from %s..." % (fname,))
 df = pandas.read_csv(fname)
-gr = list(df.groupby((df["HADM_ID"], df["ITEMID"], df["VALUEUOM"])))
+df_groups = df.groupby((df["HADM_ID"], df["ITEMID"], df["VALUEUOM"]))
+gr = list(df_groups)
 print("Training: Got %d points (%d admissions)." % (len(df), len(gr)))
 
 # 'gr' then is a list of: ((HADM_ID, ITEMID, VALUEUOM), time-series dataframe)
@@ -130,8 +131,8 @@ ts_shape = (patch_length * 2,)
 raw_input_tensor = Input(shape=ts_shape, name="raw_input")
 encode1_layer = Dense(hidden1,
                       activation='sigmoid',
-                      activity_regularizer=activity_l1(0.001),
-                      W_regularizer=l2(0.00001),
+                      activity_regularizer=activity_l1(0.0001),
+                      W_regularizer=l2(0.0001),
                       name="encode1")
 encode1_tensor = encode1_layer(raw_input_tensor)
 
@@ -147,7 +148,7 @@ plot(autoencoder1, to_file='keras_autoencoder1.png', show_shapes=True)
 
 # Train first autoencoder on raw input.
 autoencoder1.fit(x_train, x_train,
-                 nb_epoch=300,
+                 nb_epoch=600,
                  batch_size=256,
                  shuffle=True,
                  validation_data=(x_val, x_val))
@@ -155,7 +156,7 @@ autoencoder1.fit(x_train, x_train,
 # Stack the 2nd autoencoder (connecting to encode1):
 encode2_layer = Dense(hidden2,
                       activation='sigmoid',
-                      activity_regularizer=activity_l1(0.001),
+                      activity_regularizer=activity_l1(0.0001),
                       W_regularizer=l2(0.00001),
                       name="encode2")
 encode2_tensor = encode2_layer(encode1_tensor)
@@ -179,18 +180,19 @@ plot(autoencoder2, to_file='keras_autoencoder2.png', show_shapes=True)
 # encoder's weights constant (hence 'trainable = False' above) and so
 # it is simply feeding encoded input in.
 autoencoder2.fit(x_train, x_train,
-                 nb_epoch=100,
+                 nb_epoch=200,
                  batch_size=256,
                  shuffle=True,
                  validation_data=(x_val, x_val)
                  )
 
 # Finally, fine-tune stacked autoencoder on raw inputs:
+encode1_layer.trainable = True
 sae = Model(input=raw_input_tensor, output=decode2_tensor)
 sae.compile(optimizer='adadelta', loss='mse')
 plot(sae, to_file='keras_sae.png', show_shapes=True)
 sae.fit(x_train, x_train,
-        nb_epoch=400,
+        nb_epoch=200,
         batch_size=256,
         shuffle=True,
         validation_data=(x_val, x_val))
@@ -199,12 +201,20 @@ sae.fit(x_train, x_train,
 stacked_encoder = Model(input=raw_input_tensor, output=encode2_tensor)
 plot(stacked_encoder, to_file='keras_stacked_encoder.png', show_shapes=True)
 
-def plot_weights(weights, name):
+def plot_weights(weights, name, variances = None):
+    if variances is not None:
+        stds = numpy.sqrt(variances)
     fig = plt.figure(figsize = (20,20))
     outer_grid = gridspec.GridSpec(10, 10, wspace=0.0, hspace=0.0)
     for i in range(100):
         ax = plt.Subplot(fig, outer_grid[i])
-        ax.plot(weights[:,i])
+        ax.plot(numpy.arange(0, weights.shape[0]), weights[:,i])
+        if variances is not None:
+            ax.fill_between(numpy.arange(0, weights.shape[0]),
+                            weights[:,i] - stds[:,i],
+                            weights[:,i] + stds[:,i],
+                            color = "blue",
+                            alpha = 0.2)
         ax.set_xticks([])
         ax.set_yticks([])
         fig.add_subplot(ax)
@@ -216,5 +226,7 @@ def plot_weights(weights, name):
     plt.close()
     
 # Get means from 1st-layer weights:
-plot_weights(encode1_layer.get_weights()[0][:30,:], "keras_1st_layer")
-
+plot_weights(encode1_layer.get_weights()[0][:30,:],
+             "keras_1st_layer",
+             None)
+             #encode1_layer.get_weights()[0][30:,:])

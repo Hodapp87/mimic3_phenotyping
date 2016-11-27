@@ -158,7 +158,11 @@ object Main {
               // Separate out times and values, and pass forward both
               // "original" time series and warped time series:
               val series = series_raw.toSeq.sortBy(_._1)
-              val (times, values) = series.unzip
+              val (times, values2) = series.unzip
+              // Subtract mean from values:
+              // TODO: This should really be done elsewhere
+              val ymean = values2.sum / values2.size
+              val values = values2.map(_ - ymean)
               val start = times.min
               val relTimes = times.map(_ - start)
               val warpedTimes = Utils.polynomialTimeWarp(relTimes.toSeq)
@@ -206,11 +210,11 @@ object Main {
     val labs_cohort_test  = labs_cohort_split(1)
 
     // Save training & test to disk (they'll be needed later):
-    if (computeLabs) {
+    {
         val train_flat : DataFrame = Utils.flattenTimeseries(spark, labs_cohort_train)
         Utils.csvOverwrite(train_flat).
           save(f"${tmp_data_dir}/labs_cohort_train_${icd_code1}_${icd_code2}.csv")
-        val test_flat : DataFrame = Utils.flattenTimeseries(spark, labs_cohort_train)
+        val test_flat : DataFrame = Utils.flattenTimeseries(spark, labs_cohort_test)
         Utils.csvOverwrite(test_flat).
           save(f"${tmp_data_dir}/labs_cohort_test_${icd_code1}_${icd_code2}.csv")
     }
@@ -228,7 +232,7 @@ object Main {
       val paramGrid : Array[(Double, Double, Double)] = new ParamGridBuilder().
         addGrid(sigma2Param, 0.1 to 2.0 by 0.1).
         addGrid(alphaParam, 0.05 to 0.5 by 0.05).
-        addGrid(tauParam, 1.5 to 4.0 by 0.05).
+        addGrid(tauParam, 0.05 to 2.0 by 0.05).
         build.
         map { pm =>
           (pm.get(sigma2Param).get,
@@ -272,9 +276,9 @@ object Main {
      ***********************************************************************/
     if (regression) {
       // Perform regression over training data:
-      val sigma2 = 1.4
-      val alpha = 0.1
-      val tau = 3.55
+      val sigma2 = 0.1
+      val alpha = 0.5
+      val tau = 0.1
       // TODO: Pull these out to commandline options?  Or something
       val gprModels = labs_cohort_train.map { p: PatientTimeSeries =>
         // Train a model for every time-series in training set:

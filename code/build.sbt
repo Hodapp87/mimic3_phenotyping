@@ -32,3 +32,5 @@ mainClass in assembly := Some("edu.gatech.cse8803.main")
 // spark-shell --packages "com.cloudera.sparkts:sparkts:0.4.0"
 // Perhaps also consult:
 // https://stackoverflow.com/questions/37643831/how-to-run-spark-shell-with-local-packages
+
+// spark-submit --master "local[*]" target/scala-2.11/cse8803_project_2.11-1.0.jar

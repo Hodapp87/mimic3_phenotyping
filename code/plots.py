@@ -12,18 +12,6 @@ import numpy
 import math
 
 
-#######################################################################
-# Loading data
-#######################################################################
-
-ts_raw = pandas.read_csv(
-    utils.get_single_csv("../data-temp/labs_cohort_train_518_584.csv"))
-ts_raw_groups = ts_raw.groupby((ts_raw["HADM_ID"], ts_raw["ITEMID"], ts_raw["VALUEUOM"]))
-
-ts_gpr = pandas.read_csv(
-    utils.get_single_csv("../data-temp/labs_cohort_predict_518_584.csv"))
-ts_gpr_groups = ts_gpr.groupby((ts_gpr["HADM_ID"], ts_gpr["ITEMID"], ts_gpr["VALUEUOM"]))
-
 def gpr_plot(raw_subdf, gpr_subdf, ax = None, labels = True, legend = True):
     """Plot the results from a "raw" time-series sub-dataframe, and from a
     Gaussian Process Regression interpolated sub-dataframe.  They are
@@ -65,8 +53,10 @@ def gpr_plot(raw_subdf, gpr_subdf, ax = None, labels = True, legend = True):
         ax1.legend(lines[:3], labels[:3], loc='best')
     return ax5
 
-def gpr_plot_grid(raw_groups, subdf_groups, rows = 8, cols = 8, random = True):
-    groups = list(ts_raw_groups.groups.keys())
+def gpr_plot_grid(fig, raw_groups, gpr_groups, rows = 8, cols = 8, random = True):
+    numpy.random.seed(0x12345)
+    groups = list(raw_groups.groups.keys())
+    groups.sort()
     outer_grid = gridspec.GridSpec(rows, cols, wspace=0.0, hspace=0.0)
     for i in range(rows * cols):
         ax = plt.Subplot(fig, outer_grid[i])
@@ -74,21 +64,44 @@ def gpr_plot_grid(raw_groups, subdf_groups, rows = 8, cols = 8, random = True):
             group_id = groups[numpy.random.randint(len(groups))]
         else:
             group_id = groups[i]
-        ax2 = gpr_plot(ts_raw_groups.get_group(group_id), ts_gpr_groups.get_group(group_id), ax, False, False)
+        try:
+            ax2 = gpr_plot(raw_groups.get_group(group_id), gpr_groups.get_group(group_id), ax, False, False)
+        except KeyError:
+            print("Can't find %s" % (group_id,))
         ax.set_xticks([])
         ax.set_yticks([])
         fig.add_subplot(ax)
     plt.tight_layout()
 
-fig = plt.figure(figsize = (40,40))
-gpr_plot_grid(ts_raw_groups, ts_gpr_groups, 8, 8)
-plt.savefig("timeseries.png", bbox_inches='tight')
-plt.close()
+def plots():
+    #######################################################################
+    # Loading data
+    #######################################################################
 
-# Just pick something:
-idx = 100
-group_id = list(ts_raw_groups.groups.keys())[idx]
-gpr_plot(ts_raw_groups.get_group(group_id), ts_gpr_groups.get_group(group_id))
-plt.title(str(group_id))
-plt.savefig("timeseries_single.png", bbox_inches='tight')
-plt.close()
+    ts_raw = pandas.read_csv(
+        utils.get_single_csv("../data-temp/labs_cohort_train_518_584.csv"))
+    ts_raw_groups = ts_raw.groupby((ts_raw["HADM_ID"], ts_raw["ITEMID"], ts_raw["VALUEUOM"]))
+
+    ts_gpr = pandas.read_csv(
+        utils.get_single_csv("../data-temp/labs_cohort_predict_518_584.csv"))
+    ts_gpr_groups = ts_gpr.groupby((ts_gpr["HADM_ID"], ts_gpr["ITEMID"], ts_gpr["VALUEUOM"]))
+
+    #######################################################################
+    # Plotting
+    #######################################################################
+    fig = plt.figure(figsize = (40,40))
+    gpr_plot_grid(fig, ts_raw_groups, ts_gpr_groups, 8, 8)
+    plt.savefig("timeseries.png", bbox_inches='tight')
+    plt.close()
+
+    # Just pick something:
+    idx = 100
+    group_id = list(ts_raw_groups.groups.keys())[idx]
+    gpr_plot(ts_raw_groups.get_group(group_id), ts_gpr_groups.get_group(group_id))
+    plt.title(str(group_id))
+    plt.savefig("timeseries_single.png", bbox_inches='tight')
+    plt.close()
+
+
+if __name__ == "__main__":
+    plots()

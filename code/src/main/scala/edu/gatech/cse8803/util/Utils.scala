@@ -65,6 +65,26 @@ case object Utils {
     diffs.foldLeft(Seq(0.0))((l,d) => (d + l(0)) +: l).reverse
   }
 
+  def covarMtx(x1 : Iterable[Double], x2 : Iterable[Double],
+    k : (Double,Double) => Double) : BDM[Double] =
+  {
+    /** Build a covariance matrix from x1 and x2 given a covariance
+      * function.  For inputs of lengths M and N respectively, The
+      * resultant matrix will by MxN, and element (i,j) will be
+      * k(x1[i], x2[j]). */
+
+    // Breeze constructs matrices column-major, thus, we want our
+    // *inner* iteration to be down a column and our outer iteration
+    // to be across the rows.  Since each element of x1 corresponds
+    // with a row, each traversal of x1 then corresponds to a column,
+    // hence, x1 is the inner iteration:
+    val data : Array[Double] = x2.flatMap {
+      t2 => x1.map { t1 => k(t1, t2) }
+    }.toArray
+    new BDM(x1.size, x2.size, data)
+  }
+
+  
   def rationalQuadraticCovar(x1 : Iterable[Double], x2 : Iterable[Double],
     sigma2 : Double, alpha : Double, tau : Double) : BDM[Double] =
   {
@@ -74,20 +94,30 @@ case object Utils {
       * Lasko, Denny, & Levy (2013), equation 3.
       */
 
-    // Breeze constructs matrices column-major, thus, we want our
-    // *inner* iteration to be down a column and our outer iteration
-    // to be across the rows.  Since each element of x1 corresponds
-    // with a row, each traversal of x1 then corresponds to a column,
-    // hence, x1 is the inner iteration:
-    val data : Array[Double] = x2.flatMap {
-      t2 => x1.map { t1 => t1 - t2 }
-    }.toArray
-    val mtx = new BDM(x1.size, x2.size, data)
-    // 'mtx' now has every t1-t2
+    val fn = (t1 : Double, t2 : Double) => {
+      val d2 = pow(t1-t2, 2)
+      sigma2 * pow((d2 / (2*alpha*tau*tau)) + 1.0, -alpha)
+    }
+    covarMtx(x1, x2, fn)
+  }
 
-    // Note parenthesis around quotient.  Precedence is a little
-    // borked, so the addition must occur outside.
-    sigma2 :* pow(((mtx :* mtx) :/ (2*alpha*tau*tau)) + 1.0, -alpha)
+  def squaredExpCovar(x1 : Iterable[Double], x2 : Iterable[Double],
+    sigma2f : Double, sigma2n : Double, l : Double) : BDM[Double] =
+  {
+    /**
+      * Compute the covariance matrix using the squared-exponential
+      * covariance function given in "Gaussian Processes for Machine
+      * Learning" (Rasmussen & Williams), equation 2.31.
+      */
+
+    // If this ever were being done in much larger inputs, a lot of
+    // room for optimization probably exists as this has several
+    // completely-parallel multiplications.
+    val fn = (t1 : Double, t2 : Double) => {
+      val d2 = pow(t1-t2, 2)
+      sigma2f * Math.exp(-d2 /(2*l*l)) + (if (t1==t2) sigma2n else 0)
+    }
+    covarMtx(x1, x2, fn)
   }
 
   def gprTrain(ts : Iterable[(Double, Double)],
@@ -102,7 +132,7 @@ case object Utils {
       * 
       * Returns: (log marginal likelihood, L matrix, A matrix) - where
       * 'A' is what the text denotes as alpha (no relation to the
-      * hyperparameter alpha.  If 'ts' has N elements, then 'L' will
+      * hyperparameter alpha)a.  If 'ts' has N elements, then 'L' will
       * have dimensions N x N, and 'A' will have dimensions N x 1.
       */
     // TODO: Comment more fully.
@@ -110,11 +140,12 @@ case object Utils {
     val (x, y) = ts.unzip
     // Refer to Rasmussen & Williams, algorithm 2.1:
     val n : Int = x.size
+    //val K = squaredExpCovar(x, x, sigma2f, sigma2n, l)
     val K = rationalQuadraticCovar(x, x, sigma2, alpha, tau)
     val L = cholesky.apply(K + BDM.eye[Double](n) * sigma2)
     val ym : BDM[Double] = new BDM(n, 1, y.toArray)
     val A = L.t \ (L \ ym)
-    // ym.t is 1 x n, alph is n x 1, thus prod is 1 x 1, so (0,0) in
+    // ym.t is 1 x n, A is n x 1, thus prod is 1 x 1, so (0,0) in
     // 'll' is the only element.  Also, I must do this separately
     // because indices can't go on the expression for some reason.
     val prod = ym.t * A
@@ -135,12 +166,14 @@ case object Utils {
       */
 
     // Compute k*, covariance between training points & test points:
-    val ks = rationalQuadraticCovar(xTrain, xTest, sigma2, alpha, tau)
+    val ks = rationalQuadraticCovar(xTrain, xTest, sigma2, alpha, tau)    
+    //val ks = squaredExpCovar(xTrain, xTest, sigma2f, sigma2n, l)
     // Compute f*:
     val fs = ks.t * A
     // Compute v:
     val v = L \ ks
-    val covar = rationalQuadraticCovar(xTest, xTest, sigma2, alpha, tau) - v.t * v
+    val covar = rationalQuadraticCovar(xTest, xTest, sigma2, alpha, tau) - v.t * v    
+    // val covar = squaredExpCovar(xTest, xTest, sigma2f, sigma2n, l) - v.t * v
 
     // I don't know that I actually need to compute the *entire*
     // covariance matrix.  I only need its diagonals for the
