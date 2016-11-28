@@ -24,7 +24,7 @@ object Main {
     val spark = SparkSession.builder.
       // Can I just pass this in with spark-submit?
       //master("yarn").
-      master("local[*]").
+      //master("local[*]").
       appName("CSE-8803 project").
       getOrCreate()
     val sc = spark.sparkContext
@@ -131,6 +131,15 @@ object Main {
           mode(SaveMode.Overwrite).
           parquet(f"${tmp_data_dir}/diag_cohort_${icd_code1}_${icd_code2}.parquet")
 
+        // Also write a more externally-usable form:
+        val diag_cohort_categories : DataFrame = diag_cohort.
+          withColumn("ICD9_CATEGORY",
+            when($"num_code1" > 0, icd_code1).
+              when($"num_code2" > 0, icd_code2)).
+          select("HADM_ID", "ICD9_CATEGORY")
+        Utils.csvOverwrite(diag_cohort_categories).
+          save(f"${tmp_data_dir}/diag_cohort_categories_${icd_code1}_${icd_code2}.csv")
+
         // Get the lab events which meet 'lab_min_series', which are from
         // an admission in the cohort, and which are of the desired test.
         val labs_cohort_df : DataFrame = labs_length_ok.
@@ -204,12 +213,20 @@ object Main {
       }
 
     // Separate training & test:
-    val labs_cohort_split = labs_cohort.randomSplit(
+    val labs_cohort_split = labs_cohort.map { ps: PatientTimeSeries =>
+      ((ps.adm_id, ps.item_id, ps.unit), ps)
+    }.sortByKey(true).
+      map(_._2).
+      randomSplit(
       Array(trainRatio, 1.0 - trainRatio), randomSeed)
     val labs_cohort_train = labs_cohort_split(0)
     val labs_cohort_test  = labs_cohort_split(1)
 
+    // For some reason I'm having to write this every time, as if
+    // labs_cohort_train/labs_cohort_test are non-deterministic.
+
     // Save training & test to disk (they'll be needed later):
+    // if (computeLabs)
     {
         val train_flat : DataFrame = Utils.flattenTimeseries(spark, labs_cohort_train)
         Utils.csvOverwrite(train_flat).
@@ -229,10 +246,19 @@ object Main {
       val alphaParam = new DoubleParam("", "alpha", "")
       val tauParam = new DoubleParam("", "tau", "")
 
+      // sigma2,alpha,tau,log_likelihood,lab_min_series,item_test
+      // 0.1,0.15000000000000002,1.5000000000000007,482.8546422203833,3,50820
+
+      // sigma2,alpha,tau,log_likelihood,lab_min_series,item_test
+      // 0.01,0.18000000000000002,1.25,116812.48998898288,3,50820
+
+      // sigma2,alpha,tau,log_likelihood,lab_min_series,item_test
+      // 0.012000000000000004,0.18900000000000003,1.2459999999999993,117664.8588038926,3,50820
+
       val paramGrid : Array[(Double, Double, Double)] = new ParamGridBuilder().
-        addGrid(sigma2Param, 0.1 to 2.0 by 0.1).
-        addGrid(alphaParam, 0.05 to 0.5 by 0.05).
-        addGrid(tauParam, 0.05 to 2.0 by 0.05).
+        addGrid(sigma2Param, 0.001 to 0.1 by 0.001).
+        addGrid(alphaParam, 0.17 to 0.19 by 0.001).
+        addGrid(tauParam, 1.24 to 1.26 by 0.001).
         build.
         map { pm =>
           (pm.get(sigma2Param).get,
@@ -276,9 +302,9 @@ object Main {
      ***********************************************************************/
     if (regression) {
       // Perform regression over training data:
-      val sigma2 = 0.1
-      val alpha = 0.5
-      val tau = 0.1
+      val sigma2 = 0.012
+      val alpha = 0.189
+      val tau = 1.246
       // TODO: Pull these out to commandline options?  Or something
       val gprModels = labs_cohort_train.map { p: PatientTimeSeries =>
         // Train a model for every time-series in training set:
