@@ -17,6 +17,9 @@ from keras.regularizers import activity_l1, l2, activity_l2
 from keras import backend as K
 from keras import objectives
 
+import sklearn.manifold
+import sklearn.preprocessing
+
 # Make sure pydot-ng is installed for the below
 from keras.utils.visualize_util import plot
 
@@ -24,31 +27,16 @@ from keras.utils.visualize_util import plot
 # Loading data
 #######################################################################
 
-input_path = "../data-temp/labs_cohort_predict_518_584.csv"
-
-fname = utils.get_single_csv(input_path)
-print("Training: Loading from %s..." % (fname,))
-df = pandas.read_csv(fname)
+df = pandas.read_csv(
+    utils.get_single_csv("../data-temp/labs_cohort_predict_518_584.csv"))
 df_groups = df.groupby((df["HADM_ID"], df["ITEMID"], df["VALUEUOM"]))
 gr = list(df_groups)
 print("Training: Got %d points (%d admissions)." % (len(df), len(gr)))
 
 # 'gr' then is a list of: ((HADM_ID, ITEMID, VALUEUOM), time-series dataframe)
 
-#######################################################################
-# Loading data
-#######################################################################
-
-# Since Spark saves the CSV data by partition, we must still find the
-# single file in that path (we coalesced to one partition, but it's
-# still not a known filename):
-files = [d for d in os.listdir(input_path) if d.endswith(".csv")]
-if len(files) != 1:
-    raise Exception("Can't find single CSV file in %s" % (input_path,))
-
-fname = os.path.join(input_path, files[0])
-print("Loading from %s..." % (fname,))
-df = pandas.read_csv(fname)
+labels = pandas.read_csv(
+    utils.get_single_csv("../data-temp/diag_cohort_categories_518_584.csv"))
 
 # Standardize input to mean 0, variance 1 (to confuse matters a
 # little, the data that we're standardizing is itself mean and
@@ -192,7 +180,7 @@ sae = Model(input=raw_input_tensor, output=decode2_tensor)
 sae.compile(optimizer='adadelta', loss='mse')
 plot(sae, to_file='keras_sae.png', show_shapes=True)
 sae.fit(x_train, x_train,
-        nb_epoch=200,
+        nb_epoch=400,
         batch_size=256,
         shuffle=True,
         validation_data=(x_val, x_val))
@@ -200,33 +188,49 @@ sae.fit(x_train, x_train,
 # Then, here is our model which provides 2nd hidden layer features:
 stacked_encoder = Model(input=raw_input_tensor, output=encode2_tensor)
 plot(stacked_encoder, to_file='keras_stacked_encoder.png', show_shapes=True)
-
-def plot_weights(weights, name, variances = None):
-    if variances is not None:
-        stds = numpy.sqrt(variances)
-    fig = plt.figure(figsize = (20,20))
-    outer_grid = gridspec.GridSpec(10, 10, wspace=0.0, hspace=0.0)
-    for i in range(100):
-        ax = plt.Subplot(fig, outer_grid[i])
-        ax.plot(numpy.arange(0, weights.shape[0]), weights[:,i])
-        if variances is not None:
-            ax.fill_between(numpy.arange(0, weights.shape[0]),
-                            weights[:,i] - stds[:,i],
-                            weights[:,i] + stds[:,i],
-                            color = "blue",
-                            alpha = 0.2)
-        ax.set_xticks([])
-        ax.set_yticks([])
-        fig.add_subplot(ax)
-    # Why didn't I do this?
-    #plt.savefig("%s.eps" % (name,), bbox_inches='tight')
-    plt.savefig("%s.pdf" % (name,), bbox_inches='tight')
-    plt.savefig("%s.png" % (name,), bbox_inches='tight')
-    plt.tight_layout()
-    plt.close()
     
 # Get means from 1st-layer weights:
-plot_weights(encode1_layer.get_weights()[0][:30,:],
-             "keras_1st_layer",
-             None)
-             #encode1_layer.get_weights()[0][30:,:])
+utils.plot_weights(encode1_layer.get_weights()[0][:30,:],
+                   None)
+                   #encode1_layer.get_weights()[0][30:,:])
+plt.savefig("keras_1st_layer.eps", bbox_inches='tight')
+plt.savefig("keras_1st_layer.png", bbox_inches='tight')
+plt.close()
+
+#######################################################################
+# Disconnected scratch-pile
+#######################################################################
+
+# TODO: Don't hard-code colors in this
+labels["color"] = numpy.where(labels["ICD9_CATEGORY"] == 518, "red",
+                              numpy.where(labels["ICD9_CATEGORY"] == 584,
+                                          "blue", "black"))
+
+# Build model for 1st-layer features:
+encoder1 = Model(input=raw_input_tensor, output=encode1_tensor)
+
+features_raw1 = stacked_encoder.predict(x_train)
+ss = sklearn.preprocessing.StandardScaler()
+features1 = ss.fit_transform(features_raw1)
+
+print("t-SNE on 1st-layer features...")
+tsne1 = sklearn.manifold.TSNE(random_state = 0)
+Y_tsne1 = tsne.fit_transform(features1)
+
+plt.scatter(Y_tsne1[:,0], Y_tsne1[:, 1], color = labels["color"])
+plt.savefig("tsne_1st_layer.eps", bbox_inches='tight')
+plt.savefig("tsne_1st_layer.png", bbox_inches='tight')
+plt.close()
+
+print("t-SNE on 2nd-layer features...")
+features_raw2 = stacked_encoder.predict(x_train)
+ss = sklearn.preprocessing.StandardScaler()
+features2 = ss.fit_transform(features_raw2)
+
+tsne2 = sklearn.manifold.TSNE(random_state = 0)
+Y_tsne2 = tsne.fit_transform(features2)
+
+plt.scatter(Y_tsne2[:,0], Y_tsne2[:, 1], color = labels["color"])
+plt.savefig("tsne_2nd_layer.eps", bbox_inches='tight')
+plt.savefig("tsne_2nd_layer.png", bbox_inches='tight')
+plt.close()
