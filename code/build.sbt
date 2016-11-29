@@ -1,3 +1,4 @@
+// TODO: Change this?
 name := "cse8803_project"
 
 version := "1.0"
@@ -38,3 +39,15 @@ mainClass in assembly := Some("edu.gatech.cse8803.main")
 
 //val output_dir : String = "s3://bd4h-mimic3/cohort_518_584_50820/"
 //val mimic3_dir : String = "s3://bd4h-mimic3/"
+
+    // Two ICD codes; we want one or the other, but not both.
+    // val icd_code1 = "518"
+    // val icd_code2 = "584"
+//    val icd_code1 = "276"
+//    val icd_code2 = "427"
+
+    // ITEMID of the test we're interested in:
+    // val item_test = 50820
+//    val item_test = 51268
+
+// 11558-4
