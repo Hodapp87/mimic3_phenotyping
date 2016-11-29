@@ -59,8 +59,8 @@ print("Got %d points (%d admissions)." % (len(df), len(gr)))
 # time-series.  The length of these contiguous patches is set to twice
 # the padding before and after in order to ensure every series can
 # supply a patch.
-padding = 7.5
-interval = 0.5
+padding = 2.5
+interval = 0.25
 patch_length = int(math.ceil(2 * padding / interval))
 
 # So, assign a weight to each time-series based on how many patches
@@ -119,8 +119,8 @@ ts_shape = (patch_length * 2,)
 raw_input_tensor = Input(shape=ts_shape, name="raw_input")
 encode1_layer = Dense(hidden1,
                       activation='sigmoid',
-                      activity_regularizer=activity_l1(0.0001),
-                      W_regularizer=l2(0.0001),
+                      activity_regularizer=activity_l1(0.00005),
+                      W_regularizer=l2(0.0002),
                       name="encode1")
 encode1_tensor = encode1_layer(raw_input_tensor)
 
@@ -136,7 +136,7 @@ plot(autoencoder1, to_file='keras_autoencoder1.png', show_shapes=True)
 
 # Train first autoencoder on raw input.
 autoencoder1.fit(x_train, x_train,
-                 nb_epoch=600,
+                 nb_epoch=200,
                  batch_size=256,
                  shuffle=True,
                  validation_data=(x_val, x_val))
@@ -144,8 +144,8 @@ autoencoder1.fit(x_train, x_train,
 # Stack the 2nd autoencoder (connecting to encode1):
 encode2_layer = Dense(hidden2,
                       activation='sigmoid',
-                      activity_regularizer=activity_l1(0.0001),
-                      W_regularizer=l2(0.00001),
+                      activity_regularizer=activity_l1(0.00005),
+                      W_regularizer=l2(0.0002),
                       name="encode2")
 encode2_tensor = encode2_layer(encode1_tensor)
 
@@ -180,7 +180,7 @@ sae = Model(input=raw_input_tensor, output=decode2_tensor)
 sae.compile(optimizer='adadelta', loss='mse')
 plot(sae, to_file='keras_sae.png', show_shapes=True)
 sae.fit(x_train, x_train,
-        nb_epoch=400,
+        nb_epoch=200,
         batch_size=256,
         shuffle=True,
         validation_data=(x_val, x_val))
@@ -188,7 +188,8 @@ sae.fit(x_train, x_train,
 # Then, here is our model which provides 2nd hidden layer features:
 stacked_encoder = Model(input=raw_input_tensor, output=encode2_tensor)
 plot(stacked_encoder, to_file='keras_stacked_encoder.png', show_shapes=True)
-    
+
+print("Plotting 1st-layer weights...")
 # Get means from 1st-layer weights:
 utils.plot_weights(encode1_layer.get_weights()[0][:30,:],
                    None)
@@ -201,21 +202,24 @@ plt.close()
 # Disconnected scratch-pile
 #######################################################################
 
-# TODO: Don't hard-code colors in this
-labels["color"] = numpy.where(labels["ICD9_CATEGORY"] == 518, "red",
-                              numpy.where(labels["ICD9_CATEGORY"] == 584,
+
+# TODO: Solve this better
+
+code1, code2 = labels["ICD9_CATEGORY"].unique()
+labels["color"] = numpy.where(labels["ICD9_CATEGORY"] == code1, "red",
+                              numpy.where(labels["ICD9_CATEGORY"] == code2,
                                           "blue", "black"))
 
 # Build model for 1st-layer features:
 encoder1 = Model(input=raw_input_tensor, output=encode1_tensor)
 
-features_raw1 = stacked_encoder.predict(x_train)
+features_raw1 = encoder1.predict(x_train)
 ss = sklearn.preprocessing.StandardScaler()
 features1 = ss.fit_transform(features_raw1)
 
 print("t-SNE on 1st-layer features...")
 tsne1 = sklearn.manifold.TSNE(random_state = 0)
-Y_tsne1 = tsne.fit_transform(features1)
+Y_tsne1 = tsne1.fit_transform(features1)
 
 plt.scatter(Y_tsne1[:,0], Y_tsne1[:, 1], color = labels["color"])
 plt.savefig("tsne_1st_layer.eps", bbox_inches='tight')
@@ -228,7 +232,7 @@ ss = sklearn.preprocessing.StandardScaler()
 features2 = ss.fit_transform(features_raw2)
 
 tsne2 = sklearn.manifold.TSNE(random_state = 0)
-Y_tsne2 = tsne.fit_transform(features2)
+Y_tsne2 = tsne2.fit_transform(features2)
 
 plt.scatter(Y_tsne2[:,0], Y_tsne2[:, 1], color = labels["color"])
 plt.savefig("tsne_2nd_layer.eps", bbox_inches='tight')
