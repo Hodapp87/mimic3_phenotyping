@@ -68,6 +68,8 @@ def gpr_plot_grid(fig, raw_groups, gpr_groups, rows = 8, cols = 8, random = True
             ax2 = gpr_plot(raw_groups.get_group(group_id), gpr_groups.get_group(group_id), ax, False, False)
         except KeyError:
             print("Can't find %s" % (group_id,))
+        except IndexError:
+            print("IndexError on %s?" % (group_id,))
         ax.set_xticks([])
         ax.set_yticks([])
         fig.add_subplot(ax)
@@ -78,14 +80,17 @@ def plots():
     # Loading data
     #######################################################################
 
-    suffix = "276_427_50820"
+    #suffix = "276_427_50820"
+    suffix = "276_427_51268"
 
     ts_raw = pandas.read_csv(
         utils.get_single_csv("../data/labs_cohort_train_%s.csv" % suffix))
+    ts_raw.fillna("", inplace = True)
     ts_raw_groups = ts_raw.groupby((ts_raw["HADM_ID"], ts_raw["ITEMID"], ts_raw["VALUEUOM"]))
 
     ts_gpr = pandas.read_csv(
         utils.get_single_csv("../data/labs_cohort_predict_%s.csv" % suffix))
+    ts_gpr.fillna("", inplace = True)
     ts_gpr_groups = ts_gpr.groupby((ts_gpr["HADM_ID"], ts_gpr["ITEMID"], ts_gpr["VALUEUOM"]))
 
     #######################################################################

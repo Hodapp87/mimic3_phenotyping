@@ -27,11 +27,14 @@ from keras.utils.visualize_util import plot
 # Loading data
 #######################################################################
 
-suffix = "276_427_50820"
+#suffix = "276_427_50820"
+suffix = "276_427_51268"
 
 df = pandas.read_csv(
     utils.get_single_csv("../data/labs_cohort_predict_%s.csv" % suffix))
+df.fillna("", inplace = True)
 df_groups = df.groupby((df["HADM_ID"], df["ITEMID"], df["VALUEUOM"]))
+
 gr = list(df_groups)
 print("Training: Got %d points (%d admissions)." % (len(df), len(gr)))
 
@@ -45,8 +48,12 @@ labels = pandas.read_csv(
 # variance of the Gaussian process)
 df["MEAN"]     = df["MEAN"]     - df["MEAN"].mean()
 df["VARIANCE"] = df["VARIANCE"] - df["VARIANCE"].mean()
-df["MEAN"]     = df["MEAN"]     / df["MEAN"].std()
-df["VARIANCE"] = df["VARIANCE"] / df["VARIANCE"].std()
+mean_std = df["MEAN"].std()
+if (mean_std > 1e-20):
+    df["MEAN"] = df["MEAN"] / mean_std
+var_std = df["VARIANCE"].std()
+if (var_std > 1e-20):
+    df["VARIANCE"] = df["VARIANCE"] / var_std
 
 gr = list(df.groupby((df["HADM_ID"], df["ITEMID"], df["VALUEUOM"])))
 print("Got %d points (%d admissions)." % (len(df), len(gr)))

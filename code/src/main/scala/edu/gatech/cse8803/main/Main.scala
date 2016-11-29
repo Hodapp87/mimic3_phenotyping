@@ -14,18 +14,66 @@ import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types._
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.util._
+import scopt._
+
 import java.sql.Timestamp
+
+case class Config(
+  mimicInput : String = null,
+  outputPath : String = null,
+  icdMatrix : Boolean = false,
+  computeCohort : Boolean = false,
+  icd9Code1 : String = null,
+  icd9Code2 : String = null,
+  loincTest : String = null
+)
 
 object Main {
   def main(args: Array[String]): Unit = {
 
+    // TODO: Rename "scopt"
+    val parser = new OptionParser[Config]("scopt") {
+      head("scopt", "3.x")
+      opt[String]('i', "mimic_input").required().action { (x,c) =>
+        c.copy(mimicInput = x)
+      }.text("Path to the MIMIC-III datasets (.csv.gz); use file:/// for local paths")
+      opt[String]('o', "output_path").required().action { (x,c) =>
+        c.copy(outputPath = x)
+      }.text("Directory to write output (must already exist); use file:/// for local paths")
+      opt[Unit]('m', "write_matrix").optional().action { (x,c) =>
+        c.copy(icdMatrix = true)
+      }.text("Generate matrix of top ICD9 categories & LOINC IDs")
+      opt[Unit]('c', "cohort").optional().action { (_,c) =>
+        c.copy(computeCohort = true)
+      }.text("Generate cohort dataset from given ICD9 codes & LOINC IDs").
+        children(
+          opt[String]("icd9a").required().action { (x,c) =>
+            c.copy(icd9Code1 = x)
+          }.text("First ICD9 code to select for in cohort"),
+          opt[String]("icd9b").required().action { (x,c) =>
+            c.copy(icd9Code2 = x)
+          }.text("Second ICD9 code to select for in cohort"),
+          opt[String]('l', "loinc").required().action { (x,c) =>
+            c.copy(loincTest = x)
+          }.text("LOINC ID to select which lab test to use")
+        )
+    }
+
+    parser.parse(args, Config()) map { config =>
+      run(config)
+    } getOrElse {
+      // Do nothing?
+    }
+
+  }
+
+  def run(config : Config) : Unit = {
     /***********************************************************************
      * Boilerplate
      ***********************************************************************/
     val spark = SparkSession.builder.
-      // Can I just pass this in with spark-submit?
       //master("yarn").
-      master("local[*]").
+      //master("local[*]").
       appName("CSE-8803 project").
       getOrCreate()
     val sc = spark.sparkContext
@@ -39,10 +87,10 @@ object Main {
     /***********************************************************************
      * Run parameters
      ***********************************************************************/
-    val genMatrix = false
-    val computeLabs = true
+    //val genMatrix = true
+    val computeLabs = false
     val optimizeHyperparams = false
-    val regression = true
+    val regression = false
     // What is the minimum length (number of samples/events) in a
     // time-series that we'll consider for a given admission & item?
     val lab_min_series = 3
@@ -55,7 +103,8 @@ object Main {
     val icd_code2 = "427"
 
     // ITEMID of the test we're interested in:
-    val item_test = 50820
+    // val item_test = 50820
+    val item_test = 51268
 
     // For training & test split:
     val randomSeed : Long = 0x12345
@@ -64,24 +113,16 @@ object Main {
     // TODO: Perhaps pass the above in as commandline options
 
     /***********************************************************************
-     * Input data directories
-     ***********************************************************************/
-    //val output_dir : String = "s3://bd4h-mimic3/cohort_518_584_50820/"
-    //val mimic3_dir : String = "s3://bd4h-mimic3/"
-    val output_dir : String = f"file:///home/hodapp/source/bd4h-project/data/"
-    val mimic3_dir : String = "file:////mnt/dev/mimic3/"
-
-    /***********************************************************************
      * Loading & transforming data
      ***********************************************************************/
 
     // These are small enough to cache:
     val d_icd_diagnoses = Utils.csv_from_s3(
-      spark, f"${mimic3_dir}/D_ICD_DIAGNOSES.csv.gz", Some(Schemas.d_icd_diagnoses))
+      spark, f"${config.mimicInput}/D_ICD_DIAGNOSES.csv.gz", Some(Schemas.d_icd_diagnoses))
     d_icd_diagnoses.cache()
 
     val d_labitems = Utils.csv_from_s3(
-      spark, f"${mimic3_dir}/D_LABITEMS.csv.gz", Some(Schemas.d_labitems))
+      spark, f"${config.mimicInput}/D_LABITEMS.csv.gz", Some(Schemas.d_labitems))
     // D_LABITEMS is fairly small, so make a map of it:
     val labitemMap : Map[Int, LabItem] = d_labitems.
       rdd.map { r: Row =>
@@ -94,18 +135,18 @@ object Main {
       read.
       format("com.databricks.spark.csv").
       option("header", "true").
-      load(f"${mimic3_dir}/LOINC_2.56_Text/loinc.csv")
+      load(f"${config.mimicInput}/LOINC_2.56_Text/loinc.csv")
     //loinc.createOrReplaceTempView("loinc")
     //loinc.cache()
 
     val patients = Utils.csv_from_s3(
-      spark, f"${mimic3_dir}/PATIENTS.csv.gz", Some(Schemas.patients))
+      spark, f"${config.mimicInput}/PATIENTS.csv.gz", Some(Schemas.patients))
     val labevents = Utils.csv_from_s3(
-      spark, f"${mimic3_dir}/LABEVENTS.csv.gz", Some(Schemas.labevents))
+      spark, f"${config.mimicInput}/LABEVENTS.csv.gz", Some(Schemas.labevents))
     // For DIAGNOSES_ICD, also get the ICD9 category (which we reuse
     // in various places):
     val diagnoses_icd = Utils.csv_from_s3(
-      spark, f"${mimic3_dir}/DIAGNOSES_ICD.csv.gz", Some(Schemas.diagnoses)).
+      spark, f"${config.mimicInput}/DIAGNOSES_ICD.csv.gz", Some(Schemas.diagnoses)).
       withColumn("ICD9_CATEGORY", $"ICD9_CODE".substr(0, 3))
 
     // Get (HADM_ID, ITEM_ID) for those admissions and lab items which
@@ -117,15 +158,15 @@ object Main {
       filter($"count" >= lab_min_series).
       select("HADM_ID", "ITEMID")
 
-    if (genMatrix) {
+    if (config.icdMatrix) {
 
       // To bypass:
       /*
-       val labs_patients_ok = spark.read.parquet(f"${output_dir}/labs.parquet")
-       val labs_good_df = spark.read.parquet(f"${output_dir}/labs_and_admissions.parquet")
-       val icd9_per_pair = spark.read.parquet(f"${output_dir}/icd9_per_pair.parquet")
-       val pairs_per_icd9 = spark.read.parquet(f"${output_dir}/pairs_per_icd9.parquet")
-       val pairs_per_icd9_category = spark.read.parquet(f"${output_dir}/pairs_per_icd9_category.parquet")
+       val labs_patients_ok = spark.read.parquet(f"${config.outputPath}/labs.parquet")
+       val labs_good_df = spark.read.parquet(f"${config.outputPath}/labs_and_admissions.parquet")
+       val icd9_per_pair = spark.read.parquet(f"${config.outputPath}/icd9_per_pair.parquet")
+       val pairs_per_icd9 = spark.read.parquet(f"${config.outputPath}/pairs_per_icd9.parquet")
+       val pairs_per_icd9_category = spark.read.parquet(f"${config.outputPath}/pairs_per_icd9_category.parquet")
        */
       
       // Get ITEM_ID for those lab items which meet both
@@ -157,6 +198,11 @@ object Main {
       // limitation as does item_count.)
       val icd9_count = 125
 
+      val item_parquet = f"${config.outputPath}/items_limit.parquet"
+      val item_csv = f"${config.outputPath}/items_limit.csv"
+      val mtx_parquet = f"${config.outputPath}/icd9_item_matrix.parquet"
+      val mtx_csv = f"${config.outputPath}/icd9_item_matrix.csv"
+
       // Select the top 'item_count' items and write them to a file.
       // These are used later too.
       val items_limit : DataFrame = labs_patients_ok.
@@ -167,9 +213,9 @@ object Main {
       items_limit.
         write.
         mode(SaveMode.Overwrite).
-        parquet(f"${output_dir}/items_limit.parquet")
+        parquet(item_parquet)
       Utils.csvOverwrite(items_limit).
-        save(f"${output_dir}/item_limit.csv")
+        save(item_csv)
 
       // Get ITEMID & LOINC code from the top 100, associate these
       // with admissions and the ICD-9 categories of each, and then
@@ -197,9 +243,12 @@ object Main {
       icd9_item_matrix.
         write.
         mode(SaveMode.Overwrite).
-        parquet(f"${output_dir}/icd9_item_matrix.parquet")
+        parquet(mtx_parquet)
       Utils.csvOverwrite(icd9_item_matrix).
-        save(f"${output_dir}/icd9_item_matrix.csv")
+        save(mtx_csv)
+
+      println(f"Wrote top item list to: ${item_csv}, ${item_parquet}")
+      println(f"Wrote top ICD-9 / LOINC matrix to: ${mtx_csv}, ${mtx_parquet}")
     }
 
     // Suffix to append to filenames of cohort-derived data:
@@ -221,7 +270,7 @@ object Main {
         diag_cohort.
           write.
           mode(SaveMode.Overwrite).
-          parquet(f"${output_dir}/diag_cohort_${suffix}.parquet")
+          parquet(f"${config.outputPath}/diag_cohort_${suffix}.parquet")
 
         // Also write a more externally-usable form:
         val diag_cohort_categories : DataFrame = diag_cohort.
@@ -230,14 +279,15 @@ object Main {
               when($"num_code2" > 0, icd_code2)).
           select("HADM_ID", "ICD9_CATEGORY")
         Utils.csvOverwrite(diag_cohort_categories).
-          save(f"${output_dir}/diag_cohort_categories_${suffix}.csv")
+          save(f"${config.outputPath}/diag_cohort_categories_${suffix}.csv")
 
         // Get the lab events which meet 'lab_min_series', which are from
         // an admission in the cohort, and which are of the desired test.
         val labs_cohort_df : DataFrame = labs_length_ok.
           join(labevents, Seq("HADM_ID", "ITEMID")).
           filter($"ITEMID" === item_test).
-          join(diag_cohort, Seq("HADM_ID"))
+          join(diag_cohort, Seq("HADM_ID")).
+          na.fill("", Seq("VALUEUOM"))
 
         // Produce time-series, and warped time-series, for all admissions
         // in the cohort (for just the selected lab items):
@@ -284,23 +334,23 @@ object Main {
         // It seems
         labs_cohort.persist(StorageLevel.MEMORY_AND_DISK)
         labs_cohort.
-          saveAsObjectFile(f"${output_dir}/labs_cohort_${suffix}_rdd")
+          saveAsObjectFile(f"${config.outputPath}/labs_cohort_${suffix}_rdd")
 
         // Flatten out to load elsewhere:
         val labs_cohort_flat : DataFrame = Utils.flattenTimeseries(spark, labs_cohort)
         labs_cohort_flat.
           write.
           mode(SaveMode.Overwrite).
-          parquet(f"${output_dir}/labs_cohort_${suffix}.parquet")
+          parquet(f"${config.outputPath}/labs_cohort_${suffix}.parquet")
         Utils.csvOverwrite(labs_cohort_flat).
-          save(f"${output_dir}/labs_cohort_${suffix}.csv")
+          save(f"${config.outputPath}/labs_cohort_${suffix}.csv")
         (diag_cohort, labs_cohort, labs_cohort_flat)
       } else {
         println("Loading saved data for diag & labs...")
-        val diag_cohort = spark.read.parquet(f"${output_dir}/diag_cohort_${suffix}.parquet")
+        val diag_cohort = spark.read.parquet(f"${config.outputPath}/diag_cohort_${suffix}.parquet")
         val labs_cohort : RDD[PatientTimeSeries] = sc.
-          objectFile(f"${output_dir}/labs_cohort_${suffix}_rdd")
-        val labs_cohort_flat = spark.read.parquet(f"${output_dir}/labs_cohort_${suffix}.parquet")
+          objectFile(f"${config.outputPath}/labs_cohort_${suffix}_rdd")
+        val labs_cohort_flat = spark.read.parquet(f"${config.outputPath}/labs_cohort_${suffix}.parquet")
         (diag_cohort, labs_cohort, labs_cohort_flat)
       }
 
@@ -322,10 +372,10 @@ object Main {
     {
         val train_flat : DataFrame = Utils.flattenTimeseries(spark, labs_cohort_train)
         Utils.csvOverwrite(train_flat).
-          save(f"${output_dir}/labs_cohort_train_${suffix}.csv")
+          save(f"${config.outputPath}/labs_cohort_train_${suffix}.csv")
         val test_flat : DataFrame = Utils.flattenTimeseries(spark, labs_cohort_test)
         Utils.csvOverwrite(test_flat).
-          save(f"${output_dir}/labs_cohort_test_${suffix}.csv")
+          save(f"${config.outputPath}/labs_cohort_test_${suffix}.csv")
     }
 
     /***********************************************************************
@@ -348,9 +398,9 @@ object Main {
       // 0.012000000000000004,0.18900000000000003,1.2459999999999993,117664.8588038926,3,50820
 
       val paramGrid : Array[(Double, Double, Double)] = new ParamGridBuilder().
-        addGrid(sigma2Param, 0.001 to 0.1 by 0.001).
-        addGrid(alphaParam, 0.17 to 0.19 by 0.001).
-        addGrid(tauParam, 1.24 to 1.26 by 0.001).
+        addGrid(sigma2Param, 0.05 to 0.5 by 0.05).
+        addGrid(alphaParam, 0.05 to 1.00 by 0.05).
+        addGrid(tauParam, 0.2 to 2.0 by 0.05).
         build.
         map { pm =>
           (pm.get(sigma2Param).get,
@@ -386,7 +436,7 @@ object Main {
         toDF("sigma2", "alpha", "tau", "log_likelihood", "lab_min_series", "item_test")
 
       Utils.csvOverwrite(hyperDf).
-        save(f"${output_dir}/hyperparams_${suffix}.csv")
+        save(f"${config.outputPath}/hyperparams_${suffix}.csv")
     }
 
     /***********************************************************************
@@ -430,11 +480,12 @@ object Main {
       tsInterp_flat.
         write.
         mode(SaveMode.Overwrite).
-        parquet(f"${output_dir}/labs_cohort_predict_${suffix}.parquet")
+        parquet(f"${config.outputPath}/labs_cohort_predict_${suffix}.parquet")
       Utils.csvOverwrite(tsInterp_flat).
-        save(f"${output_dir}/labs_cohort_predict_${suffix}.csv")
+        save(f"${config.outputPath}/labs_cohort_predict_${suffix}.csv")
     }
   }
+
 
   // Some scratch stuff I no longer use:
   /*
@@ -472,12 +523,12 @@ object Main {
         sort(desc("count")).
         write.
         mode(SaveMode.Overwrite).
-        parquet(f"${output_dir}/labs.parquet")
+        parquet(f"${config.outputPath}/labs.parquet")
       // and then both labs & admissions:
       labs_good_df.
         write.
         mode(SaveMode.Overwrite).
-        parquet(f"${output_dir}/labs_and_admissions.parquet")
+        parquet(f"${config.outputPath}/labs_and_admissions.parquet")
        */
 
       /*
@@ -491,7 +542,7 @@ object Main {
       icd9_per_pair.
         write.
         mode(SaveMode.Overwrite).
-        parquet(f"${output_dir}/icd9_per_pair.parquet")
+        parquet(f"${config.outputPath}/icd9_per_pair.parquet")
 
       // How many unique (admission, lab items) accompany each ICD-9
       // code present?  ('lab item' here refers to the entire
@@ -507,7 +558,7 @@ object Main {
       pairs_per_icd9.cache()
       pairs_per_icd9.
         write.
-        parquet(f"${output_dir}/pairs_per_icd9.parquet")
+        parquet(f"${config.outputPath}/pairs_per_icd9.parquet")
 
       // How many unique (admission, lab items) accompany each ICD-9
       // *category* present?
@@ -521,7 +572,7 @@ object Main {
       pairs_per_icd9_category.
         write.
         mode(SaveMode.Overwrite).
-        parquet(f"${output_dir}/pairs_per_icd9_category.parquet")
+        parquet(f"${config.outputPath}/pairs_per_icd9_category.parquet")
        */
    */
 }
