@@ -24,7 +24,7 @@ object Main {
     val spark = SparkSession.builder.
       // Can I just pass this in with spark-submit?
       //master("yarn").
-      //master("local[*]").
+      master("local[*]").
       appName("CSE-8803 project").
       getOrCreate()
     val sc = spark.sparkContext
@@ -46,6 +46,7 @@ object Main {
     /***********************************************************************
      * Run parameters
      ***********************************************************************/
+    val exploratory = true
     val computeLabs = false
     val optimizeHyperparams = false
     val regression = true
@@ -112,6 +113,136 @@ object Main {
       count.
       filter($"count" >= lab_min_series).
       select("HADM_ID", "ITEMID")
+
+    /***********************************************************************
+     * Exploratory stuff I don't use right now
+     ***********************************************************************/
+    if (exploratory) {
+
+      // To bypass:
+      /*
+       val labs_patients_ok = spark.read.parquet(f"${tmp_data_dir}/labs.parquet")
+       val labs_good_df = spark.read.parquet(f"${tmp_data_dir}/labs_and_admissions.parquet")
+       val icd9_per_pair = spark.read.parquet(f"${tmp_data_dir}/icd9_per_pair.parquet")
+       val pairs_per_icd9 = spark.read.parquet(f"${tmp_data_dir}/pairs_per_icd9.parquet")
+       val pairs_per_icd9_category = spark.read.parquet(f"${tmp_data_dir}/pairs_per_icd9_category.parquet")
+       */
+      
+      // Get ITEM_ID for those lab items which meet both
+      // 'lab_min_series' and 'lab_min_patients'.
+      val labs_patients_ok : DataFrame = labs_length_ok.
+        groupBy("ITEMID").
+        // How many times does this item occur, given that we're
+        // concerned only with length >= lab_min_series?
+        count.
+        filter($"count" >= lab_min_patients)
+
+      // Finally, get all (HADM_ID, ITEM_ID) that satisfy both:
+      val labs_good_df : DataFrame = labs_patients_ok.
+        join(labs_length_ok, "ITEMID").
+        // join is supposed to be an inner join, but whatever...
+        filter(not(isnull($"HADM_ID"))).
+        select("HADM_ID", "ITEMID")
+
+      labs_patients_ok.cache()
+      labs_good_df.cache()
+
+      // For 'nice' output of just which lab items are relevant (and the
+      // human-readable form):
+      labs_patients_ok.
+        dropDuplicates("ITEMID").
+        join(d_labitems, "ITEMID").
+        sort(desc("count")).
+        write.
+        mode(SaveMode.Overwrite).
+        parquet(f"${tmp_data_dir}/labs.parquet")
+      // and then both labs & admissions:
+      labs_good_df.
+        write.
+        mode(SaveMode.Overwrite).
+        parquet(f"${tmp_data_dir}/labs_and_admissions.parquet")
+
+      // How many unique ICD-9 diagnoses accompany each admission & lab
+      // item?
+      val icd9_per_pair : DataFrame = labs_good_df.
+        join(diagnoses_icd, "HADM_ID").
+        groupBy("HADM_ID", "ITEMID").
+        count.
+        withColumnRenamed("count", "icd9_unique_count")
+      icd9_per_pair.
+        write.
+        mode(SaveMode.Overwrite).
+        parquet(f"${tmp_data_dir}/icd9_per_pair.parquet")
+
+      // How many unique (admission, lab items) accompany each ICD-9
+      // code present?  ('lab item' here refers to the entire
+      // time-series, not every sample from it.)
+      val pairs_per_icd9 : DataFrame = labs_good_df.
+        join(diagnoses_icd, "HADM_ID").
+        groupBy("ICD9_CODE").
+        count.
+        withColumnRenamed("count", "adm_and_lab_count").
+        // Make a little more human-readable:
+        join(d_icd_diagnoses, "ICD9_CODE").
+        sort(desc("adm_and_lab_count"))
+      pairs_per_icd9.cache()
+      pairs_per_icd9.
+        write.
+        parquet(f"${tmp_data_dir}/pairs_per_icd9.parquet")
+
+      // How many unique (admission, lab items) accompany each ICD-9
+      // *category* present?
+      val pairs_per_icd9_category : DataFrame = labs_good_df.
+        join(diagnoses_icd, "HADM_ID").
+        groupBy("ICD9_CATEGORY").
+        count.
+        withColumnRenamed("count", "adm_and_lab_count").
+        sort(desc("adm_and_lab_count"))
+      pairs_per_icd9_category.cache()
+      pairs_per_icd9_category.
+        write.
+        mode(SaveMode.Overwrite).
+        parquet(f"${tmp_data_dir}/pairs_per_icd9_category.parquet")
+
+      // Select only the top 'item_count' items for the matrix.  (Why:
+      // We're doing a pivot on this - sort of, it's on LOINC code -
+      // and we want to limit how many columns this will produce.)
+      val item_count = 100
+
+      // How many ICD-9 categories do we want, taken from the most
+      // common?  (We don't pivot on this, so it has no such
+      // limitation as does item_count.)
+      val icd9_count = 125
+
+      val items_limit : DataFrame = labs_patients_ok.
+        sort(desc("count")).
+        limit(item_count)
+      items_limit.cache()
+
+      val icd9_item_matrix_raw : DataFrame = items_limit.
+        select("ITEMID", "LOINC_CODE").
+        filter(not(isnull($"LOINC_CODE"))).
+        join(labs_good_df, "ITEMID").
+        join(diagnoses_icd, "HADM_ID").
+        groupBy("ICD9_CATEGORY").
+        pivot("LOINC_CODE").
+        //pivot("ITEMID").
+        count.
+        na.fill(0)
+      // Sum across each row, and order by that:
+      val icd9_item_matrix : DataFrame = icd9_item_matrix_raw.
+        withColumn("sum",
+          icd9_item_matrix_raw.columns.tail.map(col).reduce(_+_)).
+        sort(desc("sum")).
+        limit(icd9_count)
+      icd9_item_matrix.persist(StorageLevel.MEMORY_AND_DISK)
+      icd9_item_matrix.
+        write.
+        mode(SaveMode.Overwrite).
+        parquet(f"${tmp_data_dir}/icd9_item_matrix.parquet")
+      Utils.csvOverwrite(icd9_item_matrix).
+        save(f"${tmp_data_dir}/icd9_item_matrix.csv")
+    }
 
     val (diag_cohort, labs_cohort, labs_cohort_flat) =
       if (computeLabs) {
@@ -319,9 +450,9 @@ object Main {
       // time range.
 
       // How many days before & after do we interpolate for?
-      val padding = 7.5
+      val padding = 2.5
       // What interval (in days) do we interpolate with?
-      val interval = 0.5
+      val interval = 0.25
       // TODO: Make these commandline options too?
 
       // Create a new time-series with these predictions:
@@ -341,94 +472,6 @@ object Main {
         parquet(f"${tmp_data_dir}/labs_cohort_predict_${icd_code1}_${icd_code2}.parquet")
       Utils.csvOverwrite(tsInterp_flat).
         save(f"${tmp_data_dir}/labs_cohort_predict_${icd_code1}_${icd_code2}.csv")
-    }
-
-    /***********************************************************************
-     * Exploratory stuff I don't use right now
-     ***********************************************************************/
-    if (false) {
-
-      // To bypass:
-      /*
-       val labs_patients_ok = spark.read.parquet(f"${tmp_data_dir}/labs.parquet")
-       val labs_good_df = spark.read.parquet(f"${tmp_data_dir}/labs_and_admissions.parquet")
-       val icd9_per_pair = spark.read.parquet(f"${tmp_data_dir}/icd9_per_pair.parquet")
-       val pairs_per_icd9 = spark.read.parquet(f"${tmp_data_dir}/pairs_per_icd9.parquet")
-       val pairs_per_icd9_category = spark.read.parquet(f"${tmp_data_dir}/pairs_per_icd9_category.parquet")
-       val lab_ts = spark.read.parquet(f"${tmp_data_dir}/lab_timeseries.parquet")
-       */
-      
-      // Get ITEM_ID for those lab items which meet both
-      // 'lab_min_series' and 'lab_min_patients'.
-      val labs_patients_ok : DataFrame = labs_length_ok.
-        groupBy("ITEMID").
-        // How many times does this item occur, given that we're
-        // concerned only with length >= lab_min_series?
-        count.
-        filter($"count" >= lab_min_patients)
-
-      // Finally, get all (HADM_ID, ITEM_ID) that satisfy both:
-      val labs_good_df : DataFrame = labs_patients_ok.
-        join(labs_length_ok, "ITEMID").
-        // join is supposed to be an inner join, but whatever...
-        filter(not(isnull($"HADM_ID"))).
-        select("HADM_ID", "ITEMID")
-
-      labs_patients_ok.cache()
-      labs_good_df.cache()
-
-      // For 'nice' output of just which lab items are relevant (and the
-      // human-readable form):
-      labs_patients_ok.
-        dropDuplicates("ITEMID").
-        join(d_labitems, "ITEMID").
-        sort(desc("count")).
-        write.
-        parquet(f"${tmp_data_dir}/labs.parquet")
-      // and then both labs & admissions:
-      labs_good_df.
-        write.
-        parquet(f"${tmp_data_dir}/labs_and_admissions.parquet")
-
-      // How many unique ICD-9 diagnoses accompany each admission & lab
-      // item?
-      val icd9_per_pair : DataFrame = labs_good_df.
-        join(diagnoses_icd, "HADM_ID").
-        groupBy("HADM_ID", "ITEMID").
-        count.
-        withColumnRenamed("count", "icd9_unique_count")
-      icd9_per_pair.
-        write.
-        parquet(f"${tmp_data_dir}/icd9_per_pair.parquet")
-
-      // How many unique (admission, lab items) accompany each ICD-9
-      // code present?  ('lab item' here refers to the entire
-      // time-series, not every sample from it.)
-      val pairs_per_icd9 : DataFrame = labs_good_df.
-        join(diagnoses_icd, "HADM_ID").
-        groupBy("ICD9_CODE").
-        count.
-        withColumnRenamed("count", "adm_and_lab_count").
-        // Make a little more human-readable:
-        join(d_icd_diagnoses, "ICD9_CODE").
-        sort(desc("adm_and_lab_count"))
-      pairs_per_icd9.cache()
-      pairs_per_icd9.
-        write.
-        parquet(f"${tmp_data_dir}/pairs_per_icd9.parquet")
-
-      // How many unique (admission, lab items) accompany each ICD-9
-      // *category* present?
-      val pairs_per_icd9_category : DataFrame = labs_good_df.
-        join(diagnoses_icd, "HADM_ID").
-        groupBy("ICD9_CATEGORY").
-        count.
-        withColumnRenamed("count", "adm_and_lab_count").
-        sort(desc("adm_and_lab_count"))
-      pairs_per_icd9_category.cache()
-      pairs_per_icd9_category.
-        write.
-        parquet(f"${tmp_data_dir}/pairs_per_icd9_category.parquet")
     }
   }
 
@@ -455,6 +498,6 @@ object Main {
    val procedures_icd = Utils.csv_from_s3("PROCEDURES_ICD")
    val services = Utils.csv_from_s3("SERVICES")
    val transfers = Utils.csv_from_s3("TRANSFERS")
-   */  
+   */
 
 }
