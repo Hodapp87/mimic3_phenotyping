@@ -169,109 +169,23 @@ object Main {
 
     // Get (HADM_ID, ITEM_ID) for those admissions and lab items which
     // meet 'lab_min_series':
-    val labs_length_ok : DataFrame = labevents.
+    val adm_and_labs : DataFrame = labevents.
       groupBy("HADM_ID", "ITEMID").
       // How long is this time-series for given admission & lab item?
       count.
       filter($"count" >= lab_min_series).
       select("HADM_ID", "ITEMID")
 
+    /***********************************************************************
+     * Actually execute commands
+     ***********************************************************************/
     if (config.icdMatrix) {
-      genMatrix(spark, config, labs_length_ok, d_labitems, diagnoses_icd)
+      genMatrix(spark, config, adm_and_labs, d_labitems, diagnoses_icd)
     }
 
     if (config.computeCohort) {
-      // Get those admissions which had >= 1 diagnosis of config.icd9Code1, or
-      // of config.icd9Code2, but not diagnoses of both.
-      val diag_cohort : DataFrame = diagnoses_icd.
-        withColumn("is_code1", ($"ICD9_CATEGORY" === config.icd9Code1).cast(IntegerType)).
-        withColumn("is_code2", ($"ICD9_CATEGORY" === config.icd9Code2).cast(IntegerType)).
-        groupBy("HADM_ID").
-        sum("is_code1", "is_code2").
-        withColumnRenamed("sum(is_code1)", "num_code1").
-        withColumnRenamed("sum(is_code2)", "num_code2").
-        filter(($"num_code1" > 0) =!= ($"num_code2" > 0))
-      diag_cohort.cache()
-      diag_cohort.
-        write.
-        mode(SaveMode.Overwrite).
-        parquet(f"${config.outputPath}/diag_cohort_${config.suffix}.parquet")
-
-      // Also write a more externally-usable form:
-      val diag_cohort_categories : DataFrame = diag_cohort.
-        withColumn("ICD9_CATEGORY",
-          when($"num_code1" > 0, config.icd9Code1).
-            when($"num_code2" > 0, config.icd9Code2)).
-        select("HADM_ID", "ICD9_CATEGORY")
-      Utils.csvOverwrite(diag_cohort_categories).
-        save(f"${config.outputPath}/diag_cohort_categories_${config.suffix}.csv")
-
-      // Get the lab events which meet 'lab_min_series', which are from
-      // an admission in the cohort, and which are of the desired test.
-      val labs_cohort_df : DataFrame = labs_length_ok.
-        join(labevents, Seq("HADM_ID", "ITEMID")).
-        withColumnRenamed("ROW_ID", "ROW_ID2").
-        join(d_labitems, "ITEMID").
-        filter($"LOINC_CODE" === config.loincTest).
-        join(diag_cohort, Seq("HADM_ID")).
-        na.fill("", Seq("VALUEUOM"))
-
-      // Produce time-series, and warped time-series, for all admissions
-      // in the cohort (for just the selected lab items):
-      val labs_cohort : RDD[PatientTimeSeries] = labs_cohort_df.rdd.
-        map { row =>
-          val code1 = row.getAs[Long]("num_code1") > 0
-          val code2 = row.getAs[Long]("num_code2") > 0
-          val k = (row.getAs[Int]("HADM_ID"),
-            row.getAs[Int]("ITEMID"),
-            row.getAs[Int]("SUBJECT_ID"),
-            row.getAs[String]("VALUEUOM"),
-            if (code1) config.icd9Code1 else { if (code2) config.icd9Code2 else "" })
-          // Grouping on all of the above might be superfluous.  Unique admission
-          // implies unique subject.
-          val v = (row.getAs[Timestamp]("CHARTTIME").getTime / 86400000.0,
-            row.getAs[Double]("VALUENUM"))
-          (k, v)
-        }.groupByKey.map { case ((adm, item, subj, uom, code), series_raw) =>
-            // Separate out times and values, and pass forward both
-            // "original" time series and warped time series:
-            val series = series_raw.toSeq.sortBy(_._1)
-            val (times, values2) = series.unzip
-            // Subtract mean from values:
-            // TODO: This should really be done elsewhere
-            val ymean = values2.sum / values2.size
-            val values = values2.map(_ - ymean)
-            val start = times.min
-            val relTimes = times.map(_ - start)
-            val warpedTimes = Utils.polynomialTimeWarp(relTimes.toSeq)
-            //val warpedTimes = relTimes
-            PatientTimeSeries(
-              adm,
-              item,
-              subj,
-              uom,
-              code,
-              relTimes.zip(values),
-              warpedTimes.zip(values)
-            )
-        }
-      // TODO: Get rid of groupByKey above and see if it helps
-      // performance.
-      // I removed coalesce below, but haven't tested that yet.
-      // It seems
-      labs_cohort.persist(StorageLevel.MEMORY_AND_DISK)
-      labs_cohort.
-        saveAsObjectFile(f"${config.outputPath}/labs_cohort_${config.suffix}_rdd")
-
-      // Flatten out to load elsewhere:
-      val labs_cohort_flat : DataFrame = Utils.flattenTimeseries(spark, labs_cohort)
-      labs_cohort_flat.
-        write.
-        mode(SaveMode.Overwrite).
-        parquet(f"${config.outputPath}/labs_cohort_${config.suffix}.parquet")
-      Utils.csvOverwrite(labs_cohort_flat).
-        save(f"${config.outputPath}/labs_cohort_${config.suffix}.csv")
-      (diag_cohort, labs_cohort, labs_cohort_flat)
+      computeCohort(spark, config, adm_and_labs, d_labitems,
+        diagnoses_icd, labevents)
     }
 
     if (config.runGPR) {
@@ -302,9 +216,6 @@ object Main {
       runGPR(spark, config, labs_cohort_train)
     }
 
-    /***********************************************************************
-     * Hyperparameter optimization for GPR
-     ***********************************************************************/
     if (config.optimizeGPR) {
       // TODO: Put this someplace else (it's duplicated)
       println("Loading saved data for diag & labs...")
@@ -313,68 +224,113 @@ object Main {
         objectFile(f"${config.outputPath}/labs_cohort_${config.suffix}_rdd")
       val labs_cohort_flat = spark.read.parquet(f"${config.outputPath}/labs_cohort_${config.suffix}.parquet")
 
-      // Hyperparameter optimization:
-      val sigma2Param = new DoubleParam("", "sigma2", "")
-      val alphaParam = new DoubleParam("", "alpha", "")
-      val tauParam = new DoubleParam("", "tau", "")
-
-      // sigma2,alpha,tau,log_likelihood,lab_min_series,item_test
-      // 0.1,0.15000000000000002,1.5000000000000007,482.8546422203833,3,50820
-
-      // sigma2,alpha,tau,log_likelihood,lab_min_series,item_test
-      // 0.01,0.18000000000000002,1.25,116812.48998898288,3,50820
-
-      // sigma2,alpha,tau,log_likelihood,lab_min_series,item_test
-      // 0.012000000000000004,0.18900000000000003,1.2459999999999993,117664.8588038926,3,50820
-
-      val paramGrid : Array[(Double, Double, Double)] = new ParamGridBuilder().
-        addGrid(sigma2Param, 0.05 to 0.5 by 0.05).
-        addGrid(alphaParam, 0.05 to 1.00 by 0.05).
-        addGrid(tauParam, 0.2 to 2.0 by 0.05).
-        build.
-        map { pm =>
-          (pm.get(sigma2Param).get,
-            pm.get(alphaParam).get,
-            pm.get(tauParam).get)
-          // The .get is intentional; it *should* throw an exception if
-          // it can't find the parameter this early.
-        }
-      
-      val paramGridVar = sc.broadcast(paramGrid)
-
-      // Why is this flatMap seemingly only using a single node?
-      // Is it the coalesce() call?  How many partitions exist?
-      // Is it the groupByKey above?
-      val labs_ll : RDD[((Double, Double, Double), Double)] = 
-        labs_cohort.flatMap { series =>
-          val s = series.warpedSeries
-          paramGridVar.value.map { case t@(sigma2, alpha, tau) =>
-            (t, Utils.gprTrain(s, sigma2, alpha, tau)._1)
-          }
-        }.reduceByKey(_ + _)
-
-      val optimal = labs_ll.
-        aggregate((0.0, 0.0, 0.0), Double.NegativeInfinity)(
-          { case(_, t) => t },
-          { (t1,t2) => if (t1._2 > t2._2) t1 else t2 }
-        )
-      // Spark, would providing an argmax/argmin function kill you?
-
-      // Quick hack to write the hyperparameters to disk:
-      val hyperDf = sc.parallelize(Seq(optimal)).
-        map { case ((sig2, a, t), ll) => (sig2, a, t, ll, lab_min_series, config.loincTest) }.
-        toDF("sigma2", "alpha", "tau", "log_likelihood", "lab_min_series", "LOINC_CODE")
-
-      Utils.csvOverwrite(hyperDf).
-        save(f"${config.outputPath}/hyperparams_${config.suffix}.csv")
+      optimizeHyperparams(spark, config, labs_cohort)
     }
 
+  }
+
+  def computeCohort(spark : SparkSession, config : Config,
+    adm_and_labs : DataFrame, d_labitems : DataFrame,
+    diagnoses_icd : DataFrame, labevents : DataFrame) : Unit =
+  {
+    import spark.implicits._
+
+    // Get those admissions which had >= 1 diagnosis of config.icd9Code1, or
+    // of config.icd9Code2, but not diagnoses of both.
+    val diag_cohort : DataFrame = diagnoses_icd.
+      withColumn("is_code1", ($"ICD9_CATEGORY" === config.icd9Code1).cast(IntegerType)).
+      withColumn("is_code2", ($"ICD9_CATEGORY" === config.icd9Code2).cast(IntegerType)).
+      groupBy("HADM_ID").
+      sum("is_code1", "is_code2").
+      withColumnRenamed("sum(is_code1)", "num_code1").
+      withColumnRenamed("sum(is_code2)", "num_code2").
+      filter(($"num_code1" > 0) =!= ($"num_code2" > 0))
+    diag_cohort.cache()
+    diag_cohort.
+      write.
+      mode(SaveMode.Overwrite).
+      parquet(f"${config.outputPath}/diag_cohort_${config.suffix}.parquet")
+
+    // Also write a more externally-usable form:
+    val diag_cohort_categories : DataFrame = diag_cohort.
+      withColumn("ICD9_CATEGORY",
+        when($"num_code1" > 0, config.icd9Code1).
+          when($"num_code2" > 0, config.icd9Code2)).
+      select("HADM_ID", "ICD9_CATEGORY")
+    Utils.csvOverwrite(diag_cohort_categories).
+      save(f"${config.outputPath}/diag_cohort_categories_${config.suffix}.csv")
+
+    // Get the lab events which meet 'lab_min_series', which are from
+    // an admission in the cohort, and which are of the desired test.
+    val labs_cohort_df : DataFrame = adm_and_labs.
+      join(labevents, Seq("HADM_ID", "ITEMID")).
+      withColumnRenamed("ROW_ID", "ROW_ID2").
+      join(d_labitems, "ITEMID").
+      filter($"LOINC_CODE" === config.loincTest).
+      join(diag_cohort, Seq("HADM_ID")).
+      na.fill("", Seq("VALUEUOM"))
+
+    // Produce time-series, and warped time-series, for all admissions
+    // in the cohort (for just the selected lab items):
+    val labs_cohort : RDD[PatientTimeSeries] = labs_cohort_df.rdd.
+      map { row =>
+        val code1 = row.getAs[Long]("num_code1") > 0
+        val code2 = row.getAs[Long]("num_code2") > 0
+        val k = (row.getAs[Int]("HADM_ID"),
+          row.getAs[Int]("ITEMID"),
+          row.getAs[Int]("SUBJECT_ID"),
+          row.getAs[String]("VALUEUOM"),
+          if (code1) config.icd9Code1 else { if (code2) config.icd9Code2 else "" })
+        // Grouping on all of the above might be superfluous.  Unique admission
+        // implies unique subject.
+        val v = (row.getAs[Timestamp]("CHARTTIME").getTime / 86400000.0,
+          row.getAs[Double]("VALUENUM"))
+        (k, v)
+      }.groupByKey.map { case ((adm, item, subj, uom, code), series_raw) =>
+          // Separate out times and values, and pass forward both
+          // "original" time series and warped time series:
+          val series = series_raw.toSeq.sortBy(_._1)
+          val (times, values2) = series.unzip
+          // Subtract mean from values:
+          // TODO: This should really be done elsewhere
+          val ymean = values2.sum / values2.size
+          val values = values2.map(_ - ymean)
+          val start = times.min
+          val relTimes = times.map(_ - start)
+          val warpedTimes = Utils.polynomialTimeWarp(relTimes.toSeq)
+          //val warpedTimes = relTimes
+          PatientTimeSeries(
+            adm,
+            item,
+            subj,
+            uom,
+            code,
+            relTimes.zip(values),
+            warpedTimes.zip(values)
+          )
+      }
+    // TODO: Get rid of groupByKey above and see if it helps
+    // performance.
+    // I removed coalesce below, but haven't tested that yet.
+    // It seems
+    labs_cohort.persist(StorageLevel.MEMORY_AND_DISK)
+    labs_cohort.
+      saveAsObjectFile(f"${config.outputPath}/labs_cohort_${config.suffix}_rdd")
+
+    // Flatten out to load elsewhere:
+    val labs_cohort_flat : DataFrame = Utils.flattenTimeseries(spark, labs_cohort)
+    labs_cohort_flat.
+      write.
+      mode(SaveMode.Overwrite).
+      parquet(f"${config.outputPath}/labs_cohort_${config.suffix}.parquet")
+    Utils.csvOverwrite(labs_cohort_flat).
+      save(f"${config.outputPath}/labs_cohort_${config.suffix}.csv")
+      (diag_cohort, labs_cohort, labs_cohort_flat)
   }
 
   def genMatrix(spark : SparkSession, config : Config, adm_and_labs : DataFrame,
     d_labitems : DataFrame, diagnoses_icd : DataFrame) : Unit =
   {
-
     import spark.implicits._
 
     val lab_min_patients = 30
@@ -502,6 +458,67 @@ object Main {
         parquet(f"${config.outputPath}/labs_cohort_predict_${config.suffix}.parquet")
       Utils.csvOverwrite(tsInterp_flat).
         save(f"${config.outputPath}/labs_cohort_predict_${config.suffix}.csv")
+  }
+
+  def optimizeHyperparams(spark : SparkSession, config : Config,
+    labs_cohort : RDD[PatientTimeSeries]) : Unit =
+  {
+    import spark.implicits._
+    val sc = spark.sparkContext
+    // Hyperparameter optimization:
+    val sigma2Param = new DoubleParam("", "sigma2", "")
+    val alphaParam = new DoubleParam("", "alpha", "")
+    val tauParam = new DoubleParam("", "tau", "")
+
+    val paramGrid : Array[(Double, Double, Double)] = new ParamGridBuilder().
+      addGrid(sigma2Param, 0.05 to 2.0 by 0.05).
+      addGrid(alphaParam, 0.05 to 2.00 by 0.05).
+      addGrid(tauParam, 0.2 to 2.0 by 0.05).
+      build.
+      map { pm =>
+        (pm.get(sigma2Param).get,
+          pm.get(alphaParam).get,
+          pm.get(tauParam).get)
+        // The .get is intentional; it *should* throw an exception if
+        // it can't find the parameter this early.
+      }
+    
+    val paramGridVar = sc.broadcast(paramGrid)
+
+    // Why is this flatMap seemingly only using a single node?
+    // Is it the coalesce() call?  How many partitions exist?
+    // Is it the groupByKey above?
+    val labs_ll : RDD[((Double, Double, Double), Double)] =
+      labs_cohort.flatMap { series =>
+        val s = series.warpedSeries
+        paramGridVar.value.map { case t@(sigma2, alpha, tau) =>
+          (t, Utils.gprTrain(s, sigma2, alpha, tau)._1)
+        }
+      }.reduceByKey(_ + _)
+
+    val optimal = labs_ll.
+      aggregate((0.0, 0.0, 0.0), Double.NegativeInfinity)(
+        { case(_, t) => t },
+        { (t1,t2) => if (t1._2 > t2._2) t1 else t2 }
+      )
+    // Spark, would providing an argmax/argmin function kill you?
+
+    // Write the hyperparameters to disk:
+    val hyperDf = sc.parallelize(Seq(optimal)).
+      map { case ((sig2, a, t), ll) => (sig2, a, t, ll, config.loincTest) }.
+      toDF("sigma2", "alpha", "tau", "log_likelihood", "LOINC_CODE");
+
+    val (sig2, a, t) = optimal._1
+    println("Optimized hyperparameters:")
+    println(f"sigma^2 = ${sig2}")
+    println(f"alpha = ${a}")
+    println(f"tau = ${t}")
+
+    val hyperparamsCsv = f"${config.outputPath}/hyperparams_${config.suffix}.csv"
+    Utils.csvOverwrite(hyperDf).
+      save(hyperparamsCsv)
+
+    print(f"Wrote hyperparameters to: ${hyperparamsCsv}")
   }
 
   // Some scratch stuff I no longer use:
