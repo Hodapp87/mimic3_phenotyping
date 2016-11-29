@@ -27,8 +27,10 @@ from keras.utils.visualize_util import plot
 # Loading data
 #######################################################################
 
+suffix = "276_427_50820"
+
 df = pandas.read_csv(
-    utils.get_single_csv("../data-temp/labs_cohort_predict_518_584.csv"))
+    utils.get_single_csv("../data/labs_cohort_predict_%s.csv" % suffix))
 df_groups = df.groupby((df["HADM_ID"], df["ITEMID"], df["VALUEUOM"]))
 gr = list(df_groups)
 print("Training: Got %d points (%d admissions)." % (len(df), len(gr)))
@@ -36,7 +38,7 @@ print("Training: Got %d points (%d admissions)." % (len(df), len(gr)))
 # 'gr' then is a list of: ((HADM_ID, ITEMID, VALUEUOM), time-series dataframe)
 
 labels = pandas.read_csv(
-    utils.get_single_csv("../data-temp/diag_cohort_categories_518_584.csv"))
+    utils.get_single_csv("../data/diag_cohort_categories_%s.csv" % suffix))
 
 # Standardize input to mean 0, variance 1 (to confuse matters a
 # little, the data that we're standardizing is itself mean and
@@ -187,15 +189,15 @@ sae.fit(x_train, x_train,
 
 # Then, here is our model which provides 2nd hidden layer features:
 stacked_encoder = Model(input=raw_input_tensor, output=encode2_tensor)
-plot(stacked_encoder, to_file='keras_stacked_encoder.png', show_shapes=True)
+plot(stacked_encoder, to_file='keras_stacked_encoder_%s.png' % suffix, show_shapes=True)
 
 print("Plotting 1st-layer weights...")
 # Get means from 1st-layer weights:
 utils.plot_weights(encode1_layer.get_weights()[0][:30,:],
                    None)
                    #encode1_layer.get_weights()[0][30:,:])
-plt.savefig("keras_1st_layer.eps", bbox_inches='tight')
-plt.savefig("keras_1st_layer.png", bbox_inches='tight')
+plt.savefig("keras_1st_layer_%s.eps" % suffix, bbox_inches='tight')
+plt.savefig("keras_1st_layer_%s.png" % suffix, bbox_inches='tight')
 plt.close()
 
 #######################################################################
@@ -222,8 +224,8 @@ tsne1 = sklearn.manifold.TSNE(random_state = 0)
 Y_tsne1 = tsne1.fit_transform(features1)
 
 plt.scatter(Y_tsne1[:,0], Y_tsne1[:, 1], color = labels["color"])
-plt.savefig("tsne_1st_layer.eps", bbox_inches='tight')
-plt.savefig("tsne_1st_layer.png", bbox_inches='tight')
+plt.savefig("tsne_1st_layer_%s.eps" % suffix, bbox_inches='tight')
+plt.savefig("tsne_1st_layer_%s.png" % suffix, bbox_inches='tight')
 plt.close()
 
 print("t-SNE on 2nd-layer features...")
@@ -235,6 +237,6 @@ tsne2 = sklearn.manifold.TSNE(random_state = 0)
 Y_tsne2 = tsne2.fit_transform(features2)
 
 plt.scatter(Y_tsne2[:,0], Y_tsne2[:, 1], color = labels["color"])
-plt.savefig("tsne_2nd_layer.eps", bbox_inches='tight')
-plt.savefig("tsne_2nd_layer.png", bbox_inches='tight')
+plt.savefig("tsne_2nd_layer_%s.eps" % suffix, bbox_inches='tight')
+plt.savefig("tsne_2nd_layer_%s.png" % suffix, bbox_inches='tight')
 plt.close()

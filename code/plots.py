@@ -78,12 +78,14 @@ def plots():
     # Loading data
     #######################################################################
 
+    suffix = "276_427_50820"
+
     ts_raw = pandas.read_csv(
-        utils.get_single_csv("../data-temp/labs_cohort_train_518_584.csv"))
+        utils.get_single_csv("../data/labs_cohort_train_%s.csv" % suffix))
     ts_raw_groups = ts_raw.groupby((ts_raw["HADM_ID"], ts_raw["ITEMID"], ts_raw["VALUEUOM"]))
 
     ts_gpr = pandas.read_csv(
-        utils.get_single_csv("../data-temp/labs_cohort_predict_518_584.csv"))
+        utils.get_single_csv("../data/labs_cohort_predict_%s.csv" % suffix))
     ts_gpr_groups = ts_gpr.groupby((ts_gpr["HADM_ID"], ts_gpr["ITEMID"], ts_gpr["VALUEUOM"]))
 
     #######################################################################
@@ -91,7 +93,7 @@ def plots():
     #######################################################################
     fig = plt.figure(figsize = (40,40))
     gpr_plot_grid(fig, ts_raw_groups, ts_gpr_groups, 8, 8)
-    plt.savefig("timeseries.png", bbox_inches='tight')
+    plt.savefig("timeseries_%s.png" % suffix, bbox_inches='tight')
     plt.close()
 
     # Just pick something:
@@ -99,7 +101,7 @@ def plots():
     group_id = list(ts_raw_groups.groups.keys())[idx]
     gpr_plot(ts_raw_groups.get_group(group_id), ts_gpr_groups.get_group(group_id))
     plt.title(str(group_id))
-    plt.savefig("timeseries_single.png", bbox_inches='tight')
+    plt.savefig("timeseries_single_%s.png" % suffix, bbox_inches='tight')
     plt.close()
 
 
