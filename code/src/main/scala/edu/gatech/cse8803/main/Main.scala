@@ -106,7 +106,7 @@ object Main {
     parser.parse(args, Config()) map { config_ =>
 
       val config = config_.copy(suffix =
-        f"${config_.icd9Code1}_${config_.icd9Code2}_${config_.loincTest}")
+        f"cohort_${config_.icd9Code1}_${config_.icd9Code2}_${config_.loincTest}")
 
       run(config)
 
@@ -189,7 +189,7 @@ object Main {
 
     if (config.optimizeGPR) {
       val labs_cohort_train : RDD[PatientTimeSeries] = sc.
-        objectFile(f"${config.outputPath}/labs_cohort_test_${config.suffix}_rdd")
+        objectFile(f"${config.outputPath}/${config.suffix}_train_rdd")
 
       optimizeHyperparams(spark, config, labs_cohort_train)
     }
@@ -197,7 +197,7 @@ object Main {
     if (config.runGPR) {
 
       val labs_cohort_train : RDD[PatientTimeSeries] = sc.
-        objectFile(f"${config.outputPath}/labs_cohort_train_${config.suffix}_rdd")
+        objectFile(f"${config.outputPath}/${config.suffix}_test_rdd")
 
       runGPR(spark, config, labs_cohort_train)
     }
@@ -304,7 +304,7 @@ object Main {
     diag_cohort.
       write.
       mode(SaveMode.Overwrite).
-      parquet(f"${config.outputPath}/diag_cohort_${config.suffix}.parquet")
+      parquet(f"${config.outputPath}/${config.suffix}_diag.parquet")
 
     // Also write a more externally-usable form:
     val diag_cohort_categories : DataFrame = diag_cohort.
@@ -313,7 +313,7 @@ object Main {
           when($"num_code2" > 0, config.icd9Code2)).
       select("HADM_ID", "ICD9_CATEGORY")
     Utils.csvOverwrite(diag_cohort_categories).
-      save(f"${config.outputPath}/diag_cohort_categories_${config.suffix}.csv")
+      save(f"${config.outputPath}/${config.suffix}_categories.csv")
 
     // Get the lab events which meet 'lab_min_series', which are from
     // an admission in the cohort, and which are of the desired test.
@@ -366,16 +366,16 @@ object Main {
     // It seems
     labs_cohort.persist(StorageLevel.MEMORY_AND_DISK)
     labs_cohort.
-      saveAsObjectFile(f"${config.outputPath}/labs_cohort_${config.suffix}_rdd")
+      saveAsObjectFile(f"${config.outputPath}/${config.suffix}_labs_rdd")
 
     // Flatten out to load elsewhere:
     val labs_cohort_flat : DataFrame = Utils.flattenTimeseries(spark, labs_cohort)
     labs_cohort_flat.
       write.
       mode(SaveMode.Overwrite).
-      parquet(f"${config.outputPath}/labs_cohort_${config.suffix}.parquet")
+      parquet(f"${config.outputPath}/${config.suffix}_labs.parquet")
     Utils.csvOverwrite(labs_cohort_flat).
-      save(f"${config.outputPath}/labs_cohort_${config.suffix}.csv")
+      save(f"${config.outputPath}/${config.suffix}_labs.csv")
 
     val randomSeed : Long = 0x12345
 
@@ -390,15 +390,15 @@ object Main {
     val labs_cohort_test  = labs_cohort_split(1)
     // Save training & test to disk (they'll be needed later):
     labs_cohort_train.
-      saveAsObjectFile(f"${config.outputPath}/labs_cohort_train_${config.suffix}_rdd")
+      saveAsObjectFile(f"${config.outputPath}/${config.suffix}_train_rdd")
     labs_cohort_test.
-      saveAsObjectFile(f"${config.outputPath}/labs_cohort_test_${config.suffix}_rdd")
+      saveAsObjectFile(f"${config.outputPath}/${config.suffix}_test_rdd")
     val train_flat : DataFrame = Utils.flattenTimeseries(spark, labs_cohort_train)
     Utils.csvOverwrite(train_flat).
-      save(f"${config.outputPath}/labs_cohort_train_${config.suffix}.csv")
+      save(f"${config.outputPath}/${config.suffix}_train.csv")
     val test_flat : DataFrame = Utils.flattenTimeseries(spark, labs_cohort_test)
     Utils.csvOverwrite(test_flat).
-      save(f"${config.outputPath}/labs_cohort_test_${config.suffix}.csv")
+      save(f"${config.outputPath}/${config.suffix}_test.csv")
   }
 
   // Hyperparameter optimization (prior to runGPR)
@@ -477,7 +477,7 @@ object Main {
     println(f"alpha = ${a}")
     println(f"tau = ${t}")
 
-    val hyperparamsCsv = f"${config.outputPath}/hyperparams_${config.suffix}.csv"
+    val hyperparamsCsv = f"${config.outputPath}/${config.suffix}_hyperparams.csv"
     Utils.csvOverwrite(hyperDf).
       save(hyperparamsCsv)
 
@@ -527,8 +527,8 @@ object Main {
     tsInterp_flat.
       write.
       mode(SaveMode.Overwrite).
-      parquet(f"${config.outputPath}/labs_cohort_predict_${config.suffix}.parquet")
+      parquet(f"${config.outputPath}/${config.suffix}_predict.parquet")
     Utils.csvOverwrite(tsInterp_flat).
-      save(f"${config.outputPath}/labs_cohort_predict_${config.suffix}.csv")
+      save(f"${config.outputPath}/${config.suffix}_predict.csv")
   }
 }

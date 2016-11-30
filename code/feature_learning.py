@@ -28,10 +28,12 @@ from keras.utils.visualize_util import plot
 #######################################################################
 
 #suffix = "276_427_50820"
-suffix = "276_427_51268"
+#suffix = "276_427_51268"
+data_dir = "../data/"
+suffix = "cohort_518_584_11558_4"
 
 df = pandas.read_csv(
-    utils.get_single_csv("../data/labs_cohort_predict_%s.csv" % suffix))
+    utils.get_single_csv("%s/%s_predict.csv" % (data_dir, suffix)))
 df.fillna("", inplace = True)
 df_groups = df.groupby((df["HADM_ID"], df["ITEMID"], df["VALUEUOM"]))
 
@@ -41,13 +43,15 @@ print("Training: Got %d points (%d admissions)." % (len(df), len(gr)))
 # 'gr' then is a list of: ((HADM_ID, ITEMID, VALUEUOM), time-series dataframe)
 
 labels = pandas.read_csv(
-    utils.get_single_csv("../data/diag_cohort_categories_%s.csv" % suffix))
+    utils.get_single_csv("%s/%s_categories.csv" % (data_dir, suffix)))
 
 # Standardize input to mean 0, variance 1 (to confuse matters a
 # little, the data that we're standardizing is itself mean and
 # variance of the Gaussian process)
 df["MEAN"]     = df["MEAN"]     - df["MEAN"].mean()
 df["VARIANCE"] = df["VARIANCE"] - df["VARIANCE"].mean()
+# Checking for near-zero standard deviation is probably pointless
+# since the data will likely be useless, but I do it anyhow
 mean_std = df["MEAN"].std()
 if (mean_std > 1e-20):
     df["MEAN"] = df["MEAN"] / mean_std
@@ -141,7 +145,9 @@ decode1_tensor = decode1_layer(encode1_tensor)
 # First model is input -> encode1 -> decode1:
 autoencoder1 = Model(input=raw_input_tensor, output=decode1_tensor)
 autoencoder1.compile(optimizer='adadelta', loss='mse')
-plot(autoencoder1, to_file='keras_autoencoder1.png', show_shapes=True)
+plot(autoencoder1,
+     to_file='%s/keras_autoencoder1.png' % (data_dir,),
+     show_shapes=True)
 
 # Train first autoencoder on raw input.
 autoencoder1.fit(x_train, x_train,
@@ -170,7 +176,9 @@ encode1_layer.trainable = False
 # Probably superfluous:
 decode1_layer.trainable = False
 autoencoder2.compile(optimizer='adadelta', loss='mse')
-plot(autoencoder2, to_file='keras_autoencoder2.png', show_shapes=True)
+plot(autoencoder2,
+     to_file='%s/keras_autoencoder2.png' % (data_dir,),
+     show_shapes=True)
 
 # Train second autoencoder.  We're basically training it on primary
 # hidden features, not raw input, because we're keeping the first
@@ -187,7 +195,9 @@ autoencoder2.fit(x_train, x_train,
 encode1_layer.trainable = True
 sae = Model(input=raw_input_tensor, output=decode2_tensor)
 sae.compile(optimizer='adadelta', loss='mse')
-plot(sae, to_file='keras_sae.png', show_shapes=True)
+plot(sae,
+     to_file='%s/keras_sae.png' % (data_dir,),
+     show_shapes=True)
 sae.fit(x_train, x_train,
         nb_epoch=200,
         batch_size=256,
@@ -196,15 +206,17 @@ sae.fit(x_train, x_train,
 
 # Then, here is our model which provides 2nd hidden layer features:
 stacked_encoder = Model(input=raw_input_tensor, output=encode2_tensor)
-plot(stacked_encoder, to_file='keras_stacked_encoder_%s.png' % suffix, show_shapes=True)
+plot(stacked_encoder,
+     to_file='%s/keras_stacked_encoder.png' % (data_dir,),
+     show_shapes=True)
 
 print("Plotting 1st-layer weights...")
 # Get means from 1st-layer weights:
 utils.plot_weights(encode1_layer.get_weights()[0][:30,:],
                    None)
                    #encode1_layer.get_weights()[0][30:,:])
-plt.savefig("keras_1st_layer_%s.eps" % suffix, bbox_inches='tight')
-plt.savefig("keras_1st_layer_%s.png" % suffix, bbox_inches='tight')
+plt.savefig("%s/%s_keras_layer1.eps" % (data_dir, suffix), bbox_inches='tight')
+plt.savefig("%s/%s_keras_layer1.png" % (data_dir, suffix), bbox_inches='tight')
 plt.close()
 
 #######################################################################
@@ -231,8 +243,8 @@ tsne1 = sklearn.manifold.TSNE(random_state = 0)
 Y_tsne1 = tsne1.fit_transform(features1)
 
 plt.scatter(Y_tsne1[:,0], Y_tsne1[:, 1], color = labels["color"])
-plt.savefig("tsne_1st_layer_%s.eps" % suffix, bbox_inches='tight')
-plt.savefig("tsne_1st_layer_%s.png" % suffix, bbox_inches='tight')
+plt.savefig("%s/%s_tsne_layer1.eps" % (data_dir, suffix), bbox_inches='tight')
+plt.savefig("%s/%s_tsne_layer1.png" % (data_dir, suffix), bbox_inches='tight')
 plt.close()
 
 print("t-SNE on 2nd-layer features...")
@@ -244,6 +256,6 @@ tsne2 = sklearn.manifold.TSNE(random_state = 0)
 Y_tsne2 = tsne2.fit_transform(features2)
 
 plt.scatter(Y_tsne2[:,0], Y_tsne2[:, 1], color = labels["color"])
-plt.savefig("tsne_2nd_layer_%s.eps" % suffix, bbox_inches='tight')
-plt.savefig("tsne_2nd_layer_%s.png" % suffix, bbox_inches='tight')
+plt.savefig("%s/%s_tsne_layer2.eps" % (data_dir, suffix), bbox_inches='tight')
+plt.savefig("%s/%s_tsne_layer2.png" % (data_dir, suffix), bbox_inches='tight')
 plt.close()

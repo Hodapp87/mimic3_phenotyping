@@ -81,15 +81,16 @@ def plots():
     #######################################################################
 
     #suffix = "276_427_50820"
-    suffix = "276_427_51268"
+    data_dir = "../data/"
+    suffix = "cohort_518_584_11558_4"
 
     ts_raw = pandas.read_csv(
-        utils.get_single_csv("../data/labs_cohort_train_%s.csv" % suffix))
+        utils.get_single_csv("%s/%s_train.csv" % (data_dir, suffix)))
     ts_raw.fillna("", inplace = True)
     ts_raw_groups = ts_raw.groupby((ts_raw["HADM_ID"], ts_raw["ITEMID"], ts_raw["VALUEUOM"]))
 
     ts_gpr = pandas.read_csv(
-        utils.get_single_csv("../data/labs_cohort_predict_%s.csv" % suffix))
+        utils.get_single_csv("%s/%s_predict.csv" % (data_dir, suffix)))
     ts_gpr.fillna("", inplace = True)
     ts_gpr_groups = ts_gpr.groupby((ts_gpr["HADM_ID"], ts_gpr["ITEMID"], ts_gpr["VALUEUOM"]))
 
@@ -98,7 +99,8 @@ def plots():
     #######################################################################
     fig = plt.figure(figsize = (40,40))
     gpr_plot_grid(fig, ts_raw_groups, ts_gpr_groups, 8, 8)
-    plt.savefig("timeseries_%s.png" % suffix, bbox_inches='tight')
+    plt.savefig("%s/%s_timeseries.png" % (data_dir, suffix), bbox_inches='tight')
+    plt.savefig("%s/%s_timeseries.eps" % (data_dir, suffix), bbox_inches='tight')
     plt.close()
 
     # Just pick something:
@@ -106,7 +108,8 @@ def plots():
     group_id = list(ts_raw_groups.groups.keys())[idx]
     gpr_plot(ts_raw_groups.get_group(group_id), ts_gpr_groups.get_group(group_id))
     plt.title(str(group_id))
-    plt.savefig("timeseries_single_%s.png" % suffix, bbox_inches='tight')
+    plt.savefig("%s/%s_timeseries_single.png" % (data_dir, suffix), bbox_inches='tight')
+    plt.savefig("%s/%s_timeseries_single.eps" % (data_dir, suffix), bbox_inches='tight')
     plt.close()
 
 
