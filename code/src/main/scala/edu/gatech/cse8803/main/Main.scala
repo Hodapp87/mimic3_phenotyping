@@ -156,6 +156,8 @@ object Main {
       spark, f"${config.mimicInput}/PATIENTS.csv.gz", Some(Schemas.patients))
     val labevents = Utils.csv_from_s3(
       spark, f"${config.mimicInput}/LABEVENTS.csv.gz", Some(Schemas.labevents))
+    labevents.persist(StorageLevel.MEMORY_AND_DISK)
+
     // For DIAGNOSES_ICD, also get the ICD9 category (which we reuse
     // in various places):
     val diagnoses_icd = Utils.csv_from_s3(
@@ -171,6 +173,7 @@ object Main {
       count.
       filter($"count" >= lab_min_series).
       select("HADM_ID", "ITEMID")
+    adm_and_labs.persist(StorageLevel.MEMORY_AND_DISK)
 
     /***********************************************************************
      * Actually execute commands
