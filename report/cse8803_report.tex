@@ -573,7 +573,7 @@ Electronic Health Records that would otherwise be hidden and that can
 lead to greater understanding of conditions and treatments. This work
 implements a method derived strongly from Lasko \emph{et al.}, but
 implements it in Apache Spark and Python and generalizes it to
-laboratory time-series data in MIMIC-III.  It will be released as an
+laboratory time-series data in MIMIC-III.  It is released as an
 open-source tool for exploration, analysis, and visualization.
 \end{abstract}
 % TODO: Turn 'will be' to 'is' and actually release it.
@@ -647,28 +647,31 @@ complexity of bodies and processes.  Lasko \emph{et
 \cite{Che2015}), but the approach that looks like it could extend to a
 deep learner with the addition of layers.
 
-\section{Problem Formulation}
-
-The goal undertaken here is to reimplement a combination of some
+The goal undertaken here was to reimplement a combination of some
 earlier results (focusing mainly on that of Lasko \emph{et
   al.}\cite{Lasko2013}) using \href{http://spark.apache.org/}{Apache
   Spark} and the MIMIC-III critical care database\cite{Johnson2016a},
-and able to run on a ``standard'' Spark setup such as
-\href{https://aws.amazon.com/emr/}{Amazon Elastic MapReduce}. The
-software behind this work is also intended to be released as an open
-source tool for accomodating exploration, analysis, and visualization
-using the techniques described herein.
+and able to run primarily on a ``standard'' Spark setup such as
+\href{https://aws.amazon.com/emr/}{Amazon Elastic MapReduce}.
+However, presently it relies on Python in order to use Keras and
+scikit-learn for feature learning and t-SNE.
 
-Most of the needed algorithms are available in existing machine
-learning libraries in languages such as MATLAB or R, however, these
-are less accessible to the aforementioned ``standard'' setup or may be
-more cumbersome to integrate with Apache Spark.  While Apache Spark
-runs on top of Java/JVM infrastructure and has access to a
-considerable ecosystem of Java-based, relevant libraries do not always
-exist or do not exist in a form which works well with Spark.
+The software behind this work is also released as an open source tool
+for accomodating exploration, analysis, and visualization using the
+techniques described herein.  % TODO: GitHub link
+
+% Most of the needed algorithms are available in existing machine
+% learning libraries in languages such as MATLAB or R, however, these
+% are less accessible to the aforementioned ``standard'' setup or may
+% be more cumbersome to integrate with Apache Spark.  While Apache
+% Spark runs on top of Java/JVM infrastructure and has access to a
+% considerable ecosystem of Java-based, relevant libraries do not
+% always exist or do not exist in a form which works well with Spark.
 
 % TODO: Mention integration with other languages via SparkR, PySpark,
 % Java APIs?
+
+\section{Approach \& Implementation}
 
 The main problems that the implementation tries to address within
 these parameters are:
@@ -677,6 +680,7 @@ these parameters are:
 \item{Loading the MIMIC-III database into a form usable from Spark}
 \item{Identifying relevant laboratory tests, admissions, and ICD-9
   codes on which to focus}
+  % Perhaps de-emphasize this
 \item{Preprocessing the time-series data with Gaussian process
   regression}
 \item{Using a two-layer stacked sparse autoencoder to perform feature
@@ -685,9 +689,9 @@ these parameters are:
   clusters}
 \end{itemize}
 
-\section{Approach and Implementation}
+\subsection{Loading \& Selecting Data}
 
-\subsection{Loading and Selecting Data}
+% TODO: Mention exploratory mode of tool?  Is it needed?
 
 The MIMIC-III database is supplied as a collection of \texttt{.csv.gz}
 files (that is, comma-separated values, compressed with gzip).  By way
@@ -702,26 +706,18 @@ described here used the following tables\cite{Johnson2016a}:
 \item \texttt{D\_LABEVENTS}: Information on each type of laboratory event
 \end{itemize}
 
-% TODO: Mention LOINC code, 11558-4?
+% TODO: Cite LOINC?
 
-From these the laboratory time-series for \texttt{ITEMID} of 50820
-(blood pH) were extracted, under the conditions that at least 3
-samples were available for a given admission, and that the admission
-involved at least one ICD-9 code 518 (other lung diseases), or at
-least one ICD-9 code 584 (acute renal failure), but not both.  The
-field \texttt{VALUEUOM} also was checked to ensure that units of
-measure were consistent.  (This combination of tests and codes was not
-chosen for any particular reason except that the dataset was able to
-accomodate it.)
+The process requires two ICD-9 categories, and one LOINC code for a
+lab test.  Admissions are filtered to those which contain a lab
+time-series of the given LOINC code and containing at least 3 samples,
+and to those containing at least one diagnosis of the first ICD-9
+category, but none of the second - or, at least one of the second
+ICD-9 category, and none of the first.
 
 All processing at this stage was done via Spark's DataFrame
 operations, aside from the final conversion to an RDD containing
 individual time-series.
-
-This produced a total of 9,035 unique admissions, 8,219 unique
-subjects, and 187,374 time-stamped samples.  70\% of these admissions
-were randomly selected for the training set, and the remaining 30\%
-for the testing set.
 
 \subsection{Preprocessing}
 
@@ -739,7 +735,7 @@ approximation can be applied to try to make the time-series more
 stationary - in the form of changing the distance in time between
 every pair of adjacent samples in order to shorten longer distances,
 but lengthen shorter ones\cite{Lasko2013}.  For original distance $d$,
-the warped distance is $d'=d^{1/3}+b$, using $a=3, b=0$ (these
+the warped distance is $d'=d^{1/a}+b$, using $a=3, b=0$ (these
 values were taken directly from equation 5 of \cite{Lasko2013} and not
 tuned further).
 
@@ -807,6 +803,13 @@ Hyperparameter optimization was likely the most time-consuming step of
 processing.  However, this step also is a highly parallelizable one,
 and so it was amenable to the distributed nature of Apache Spark.
 
+At Lasko's suggestion, the values (i.e. $y$) in each individual
+time-series were standardized to a mean of 0 and standard deviation of
+1, and this standardization was then reversed on the interpolated
+values.
+
+% TODO: Put algorithm 2.1 here perhaps rather than just citing it.
+
 \subsubsection{Interpolation}
 
 The remainder of algorithm 2.1 is not reproduced here, but the code
@@ -839,8 +842,7 @@ guide\cite{Chollet} on using the Python library
 \href{https://keras.io/}{Keras} to implement autoencoders.
 Specifically, Keras was used with
 \href{http://deeplearning.net/software/theano/}{Theano} (GPU-enabled)
-as the backend, however, it should work identically using
-\href{https://www.tensorflow.org/}{TensorFlow} as the backend.
+as the backend.
 
 These autoencoders have a fixed-size input and output, and in order to
 accomodate this, fixed-size contiguous patches were sampled from the
@@ -856,10 +858,9 @@ layers had 60 units (as each sample contained both variance and mean).
 
 As in \cite{Lasko2013}, the encoder and decoder layers used sigmoid
 encoders and linear decoders, and all hidden layers had 100 units.
-The sparsity and regularization parameters given there did not
-correspond precisely with Keras' model, so instead L1 activity
-regularization of $10^{-4}$ and L2 weight regularization of $10^{-4}$
-were used.
+Manual experimentation led to L1 activity regularization
+(i.e. sparsity constraint) of $5\times10^{-5}$ and L2 weight
+regularization of $2\times10^{-4}$.
 
 In order to perform greedy layerwise training\cite{Ng}, the network
 was then built up in stages, starting first with this:
@@ -896,7 +897,22 @@ activations of layer \texttt{encode2} as the learned sparse features.
 % clusterings that may suggest multiple different phenotypes for some
 % label, as seen in \cite[figure 5]{Lasko2013}.
 
+% TODO: t-SNE, sklearn
+
 \section{Experimental Evaluation}
+
+As a test of the tool described in this paper, experiments were run on
+a selection of the data.  Particularly, the LOINC code
+\texttt{11558-4} (which corresponds to \texttt{ITEMID} of 50820, blood
+pH) was used, and the ICD-9 categories 518 (other lung diseases) and
+584 (acute renal failure).
+
+This produced a total of 9,035 unique admissions, 8,219 unique
+patients, and 187,374 time-stamped samples.  70\% of these admissions
+were randomly selected for the training set, and the remaining 30\%
+for the testing set.
+
+% TODO: Note gender, age, percent died?
 
 An interesting detail which figure 2 of \cite{Lasko2013} shows is that
 the effects of the first layer (\texttt{encode1} here) can be
@@ -930,17 +946,15 @@ or more extensive changes\cite{Lasko2015} could be made to try to make
 the time-series more stationary.  Other covariance functions may be
 more appropriate as well.
 
-The intention was that as much as possible could be executed within
-Apache Spark on ``standard'' infrastructure such as
+The original intention of running as much as possible within Apache
+Spark on ``standard'' infrastructure such as
 \href{https://aws.amazon.com/emr/}{Amazon EMR} or
-\href{https://databricks.com/}{Databricks}.  The original intention
-was to use \href{https://deeplearning4j.org/}{DL4J}, a native Java
-library which already supports Apache Spark, but problems prevented
-this from working correctly.  It may be possible to still use DL4J,
-there may be other Java-compatible libraries accessible from Apache
-Spark, or a closer integration with Keras may be possible via Spark's
-built-in \texttt{pyspark} support (and performance may still be
-acceptable if GPU support is unavailable).
+\href{https://databricks.com/}{Databricks} was not fully met.  Further
+integration with Apache Spark still is possible; the autoencoders
+perhaps could be implemented in
+\href{https://deeplearning4j.org/}{DL4J} (a native Java library
+supporting Apache Spark) or Spark's built-in \texttt{pyspark} support
+may allow closer integration with Keras and scikit-learn.
 
 Some other areas should perhaps be explored further too.  One
 incremental change is in the use of multiple-task Gaussian processes
