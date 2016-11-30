@@ -187,21 +187,100 @@ object Main {
         diagnoses_icd, labevents)
     }
 
-    if (config.runGPR) {
-
-      val labs_cohort_train : RDD[PatientTimeSeries] = sc.
-        objectFile(f"${config.outputPath}/labs_cohort_${config.suffix}_train_rdd")
-
-      runGPR(spark, config, labs_cohort_train)
-    }
-
     if (config.optimizeGPR) {
       val labs_cohort_train : RDD[PatientTimeSeries] = sc.
-        objectFile(f"${config.outputPath}/labs_cohort_${config.suffix}_train_rdd")
+        objectFile(f"${config.outputPath}/labs_cohort_test_${config.suffix}_rdd")
 
       optimizeHyperparams(spark, config, labs_cohort_train)
     }
 
+    if (config.runGPR) {
+
+      val labs_cohort_train : RDD[PatientTimeSeries] = sc.
+        objectFile(f"${config.outputPath}/labs_cohort_train_${config.suffix}_rdd")
+
+      runGPR(spark, config, labs_cohort_train)
+    }
+
+  }
+
+  def genMatrix(spark : SparkSession, config : Config, adm_and_labs : DataFrame,
+    d_labitems : DataFrame, diagnoses_icd : DataFrame) : Unit =
+  {
+    import spark.implicits._
+
+    val lab_min_patients = 30
+    
+    // Get ITEM_ID for those lab items which meet both
+    // 'lab_min_series' and 'lab_min_patients'.
+    val labs_patients_ok : DataFrame = adm_and_labs.
+      groupBy("ITEMID").
+      // How many times does this item occur, given that we're
+      // concerned only with length >= lab_min_series?
+      count.
+      filter($"count" >= lab_min_patients)
+
+    // Finally, get all (HADM_ID, ITEM_ID) that satisfy both:
+    val labs_good_df : DataFrame = labs_patients_ok.
+      join(adm_and_labs, "ITEMID").
+      // join is supposed to be an inner join, but whatever...
+      filter(not(isnull($"HADM_ID"))).
+      select("HADM_ID", "ITEMID")
+
+    labs_patients_ok.cache()
+    labs_good_df.cache()
+
+    val item_parquet = f"${config.outputPath}/items_limit.parquet"
+    val item_csv = f"${config.outputPath}/items_limit.csv"
+    val mtx_parquet = f"${config.outputPath}/icd9_item_matrix.parquet"
+    val mtx_csv = f"${config.outputPath}/icd9_item_matrix.csv"
+
+    // Select the top 'config.loincCount' items and write them to a file.
+    // These are used later too.
+    val items_limit : DataFrame = labs_patients_ok.
+      sort(desc("count")).
+      limit(config.loincCount).
+      join(d_labitems, "ITEMID")
+    items_limit.cache()
+    items_limit.
+      write.
+      mode(SaveMode.Overwrite).
+      parquet(item_parquet)
+    Utils.csvOverwrite(items_limit).
+      save(item_csv)
+
+    // Get ITEMID & LOINC code from the top 100, associate these
+    // with admissions and the ICD-9 categories of each, and then
+    // pivot to create a new column for each LOINC code (top
+    // 'config.loincCount' of them at least), and have each row
+    // count up the number of occurrences of each ICD-9 category for
+    // each LOINC code.
+    val icd9_item_matrix_raw : DataFrame = items_limit.
+      select("ITEMID", "LOINC_CODE").
+      filter(not(isnull($"LOINC_CODE"))).
+      join(labs_good_df, "ITEMID").
+      join(diagnoses_icd, "HADM_ID").
+      groupBy("ICD9_CATEGORY").
+      pivot("LOINC_CODE").
+      count.
+      na.fill(0)
+    // Sum across each row, and order by that in order to take just
+    // 'config.icd9Count' rows:
+    val icd9_item_matrix : DataFrame = icd9_item_matrix_raw.
+      withColumn("sum",
+        icd9_item_matrix_raw.columns.tail.map(col).reduce(_+_)).
+      sort(desc("sum")).
+      limit(config.icd9Count)
+    icd9_item_matrix.persist(StorageLevel.MEMORY_AND_DISK)
+    icd9_item_matrix.
+      write.
+      mode(SaveMode.Overwrite).
+      parquet(mtx_parquet)
+    Utils.csvOverwrite(icd9_item_matrix).
+      save(mtx_csv)
+
+    println(f"Wrote top item list to: ${item_csv}, ${item_parquet}")
+    println(f"Wrote top ICD-9 / LOINC matrix to: ${mtx_csv}, ${mtx_parquet}")
   }
 
   def computeCohort(spark : SparkSession, config : Config,
@@ -326,129 +405,7 @@ object Main {
       save(f"${config.outputPath}/labs_cohort_test_${config.suffix}.csv")
   }
 
-  def genMatrix(spark : SparkSession, config : Config, adm_and_labs : DataFrame,
-    d_labitems : DataFrame, diagnoses_icd : DataFrame) : Unit =
-  {
-    import spark.implicits._
-
-    val lab_min_patients = 30
-    
-    // Get ITEM_ID for those lab items which meet both
-    // 'lab_min_series' and 'lab_min_patients'.
-    val labs_patients_ok : DataFrame = adm_and_labs.
-      groupBy("ITEMID").
-      // How many times does this item occur, given that we're
-      // concerned only with length >= lab_min_series?
-      count.
-      filter($"count" >= lab_min_patients)
-
-    // Finally, get all (HADM_ID, ITEM_ID) that satisfy both:
-    val labs_good_df : DataFrame = labs_patients_ok.
-      join(adm_and_labs, "ITEMID").
-      // join is supposed to be an inner join, but whatever...
-      filter(not(isnull($"HADM_ID"))).
-      select("HADM_ID", "ITEMID")
-
-    labs_patients_ok.cache()
-    labs_good_df.cache()
-
-    val item_parquet = f"${config.outputPath}/items_limit.parquet"
-    val item_csv = f"${config.outputPath}/items_limit.csv"
-    val mtx_parquet = f"${config.outputPath}/icd9_item_matrix.parquet"
-    val mtx_csv = f"${config.outputPath}/icd9_item_matrix.csv"
-
-    // Select the top 'config.loincCount' items and write them to a file.
-    // These are used later too.
-    val items_limit : DataFrame = labs_patients_ok.
-      sort(desc("count")).
-      limit(config.loincCount).
-      join(d_labitems, "ITEMID")
-    items_limit.cache()
-    items_limit.
-      write.
-      mode(SaveMode.Overwrite).
-      parquet(item_parquet)
-    Utils.csvOverwrite(items_limit).
-      save(item_csv)
-
-    // Get ITEMID & LOINC code from the top 100, associate these
-    // with admissions and the ICD-9 categories of each, and then
-    // pivot to create a new column for each LOINC code (top
-    // 'config.loincCount' of them at least), and have each row
-    // count up the number of occurrences of each ICD-9 category for
-    // each LOINC code.
-    val icd9_item_matrix_raw : DataFrame = items_limit.
-      select("ITEMID", "LOINC_CODE").
-      filter(not(isnull($"LOINC_CODE"))).
-      join(labs_good_df, "ITEMID").
-      join(diagnoses_icd, "HADM_ID").
-      groupBy("ICD9_CATEGORY").
-      pivot("LOINC_CODE").
-      count.
-      na.fill(0)
-    // Sum across each row, and order by that in order to take just
-    // 'config.icd9Count' rows:
-    val icd9_item_matrix : DataFrame = icd9_item_matrix_raw.
-      withColumn("sum",
-        icd9_item_matrix_raw.columns.tail.map(col).reduce(_+_)).
-      sort(desc("sum")).
-      limit(config.icd9Count)
-    icd9_item_matrix.persist(StorageLevel.MEMORY_AND_DISK)
-    icd9_item_matrix.
-      write.
-      mode(SaveMode.Overwrite).
-      parquet(mtx_parquet)
-    Utils.csvOverwrite(icd9_item_matrix).
-      save(mtx_csv)
-
-    println(f"Wrote top item list to: ${item_csv}, ${item_parquet}")
-    println(f"Wrote top ICD-9 / LOINC matrix to: ${mtx_csv}, ${mtx_parquet}")
-  }
-
-  // Gaussian process regression
-  def runGPR(spark : SparkSession, config : Config, data : RDD[PatientTimeSeries]) : Unit = {
-      // Perform regression over training data:
-      val sigma2 = 0.012
-      val alpha = 0.189
-      val tau = 1.246
-      // TODO: Pull these out to commandline options?  Or something
-      val gprModels = data.map { p: PatientTimeSeries =>
-        // Train a model for every time-series in training set:
-        val t@(ll, matL, matA) = Utils.gprTrain(p.warpedSeries, sigma2, alpha, tau)
-
-        (p, matL, matA)
-      }
-      // gprModels then has (PatientTimeSeries, L matrix, A matrix) for
-      // every *training* time-series.
-
-      // Now, generate 'predicted' time-series over a sampling of the
-      // time range.
-
-      // How many days before & after do we interpolate for?
-      val padding = 2.5
-      // What interval (in days) do we interpolate with?
-      val interval = 0.25
-      // TODO: Make these commandline options too?
-
-      // Create a new time-series with these predictions:
-      val tsInterpolated = gprModels.map { case (p, matL, matA) =>
-        val ts = p.warpedSeries.map(_._1)
-        val ts2 = (ts.min - padding) to (ts.max + padding) by interval
-        val predictions = Utils.gprPredict(ts2, ts, matL, matA, sigma2, alpha, tau)
-        PatientTimeSeriesPredicted(p.adm_id, p.item_id, p.subject_id, p.unit,
-          p.icd9category,
-          (ts2, predictions.map(_._1), predictions.map(_._2)).zipped.toList)
-      }
-
-      val tsInterp_flat : DataFrame = Utils.flattenPredictedTimeseries(spark, tsInterpolated)
-      tsInterp_flat.
-        write.
-        mode(SaveMode.Overwrite).
-        parquet(f"${config.outputPath}/labs_cohort_predict_${config.suffix}.parquet")
-      Utils.csvOverwrite(tsInterp_flat).
-        save(f"${config.outputPath}/labs_cohort_predict_${config.suffix}.csv")
-  }
-
+  // Hyperparameter optimization (prior to runGPR)
   def optimizeHyperparams(spark : SparkSession, config : Config,
     labs_cohort : RDD[PatientTimeSeries]) : Unit =
   {
@@ -459,6 +416,15 @@ object Main {
     val alphaParam = new DoubleParam("", "alpha", "")
     val tauParam = new DoubleParam("", "tau", "")
 
+    // Compute an array of (sigma2, alpha, tau) parameters, spanning a
+    // grid.  This is used for a grid search, which is admittedly a
+    // very inefficient way to go about this.  The more efficient way,
+    // and probably the more accurate one, would be to derive the
+    // gradient of the log-likelihood function (which is probably not
+    // especially complicated) and use some form of gradient-descent
+    // (like Spark already has built in).  Or, perhaps Spark has some
+    // optimization method built in that can numerically estimate
+    // gradients.
     val paramGrid : Array[(Double, Double, Double)] = new ParamGridBuilder().
       addGrid(sigma2Param, 0.05 to 2.0 by 0.05).
       addGrid(alphaParam, 0.05 to 2.00 by 0.05).
@@ -470,27 +436,40 @@ object Main {
           pm.get(tauParam).get)
         // The .get is intentional; it *should* throw an exception if
         // it can't find the parameter this early.
-      }
-    
-    val paramGridVar = sc.broadcast(paramGrid)
+     }
 
-    // Why is this flatMap seemingly only using a single node?
-    // Is it the coalesce() call?  How many partitions exist?
-    // Is it the groupByKey above?
+    // Enabling the below (and swapping paramGrid for
+    // paramGridVar.value in labs_ll) causes a problem like
+    // https://stackoverflow.com/questions/34329299/issuing-spark-submit-on-command-line-completes-tasks-but-never-returns-prompt
+    // This problem goes away on much smaller version of 'paramGrid'.
+    // I have no idea what is causing this.
+
+    // val paramGridVar = sc.broadcast(paramGrid)
+
     val labs_ll : RDD[((Double, Double, Double), Double)] =
       labs_cohort.flatMap { series =>
         val s = series.warpedSeries
-        paramGridVar.value.map { case t@(sigma2, alpha, tau) =>
-          (t, Utils.gprTrain(s, sigma2, alpha, tau)._1)
+        val grid = paramGrid
+        //val grid = paramGridVar.value
+        grid.
+          map { case t@(sigma2, alpha, tau) =>
+            // ._1 of result of gprTrain below is just the
+            // log-likelihood, which we optimize over.  We reuse the
+            // model parameters elsewhere, but they're fast enough to
+            // recompute that there's not really any point in storing
+            // them.  With more ridiculous covariance functions, or
+            // much longer time-series, that may not be true.
+            (t, Utils.gprTrain(s, sigma2, alpha, tau)._1)
         }
       }.reduceByKey(_ + _)
 
+    // Basically argmax to tell what hyperparameters produce the
+    // highest sum-log-likelihood:
     val optimal = labs_ll.
       aggregate((0.0, 0.0, 0.0), Double.NegativeInfinity)(
         { case(_, t) => t },
         { (t1,t2) => if (t1._2 > t2._2) t1 else t2 }
       )
-    // Spark, would providing an argmax/argmin function kill you?
 
     // Write the hyperparameters to disk:
     val hyperDf = sc.parallelize(Seq(optimal)).
@@ -509,104 +488,54 @@ object Main {
 
     print(f"Wrote hyperparameters to: ${hyperparamsCsv}")
   }
-
-  // Some scratch stuff I no longer use:
-  /*
-   val admissions = Utils.csv_from_s3("ADMISSIONS")
-   val callout = Utils.csv_from_s3("CALLOUT")
-   val caregivers = Utils.csv_from_s3("CAREGIVERS")
-   val chartevents = Utils.csv_from_s3("CHARTEVENTS")
-   val cptevents = Utils.csv_from_s3("CPTEVENTS")
-   val datetimeevents = Utils.csv_from_s3("DATETIMEEVENTS")
-   val drgcodes = Utils.csv_from_s3("DRGCODES")
-   val d_cpt = Utils.csv_from_s3("D_CPT")
-   val d_icd_procedures = Utils.csv_from_s3("D_ICD_PROCEDURES")
-   val d_items = Utils.csv_from_s3("D_ITEMS")
-   val icustays = Utils.csv_from_s3("ICUSTAYS")
-   val inputevents_cv = Utils.csv_from_s3("INPUTEVENTS_CV")
-   val inputevents_mv = Utils.csv_from_s3("INPUTEVENTS_MV")
-   val microbiologyevents = Utils.csv_from_s3("MICROBIOLOGYEVENTS")
-   val noteevents = Utils.csv_from_s3("NOTEEVENTS")
-   val outputevents = Utils.csv_from_s3("OUTPUTEVENTS")
-   val prescriptions = Utils.csv_from_s3("PRESCRIPTIONS")
-   val procedureevents_mv = Utils.csv_from_s3("PROCEDUREEVENTS_MV")
-   val procedures_icd = Utils.csv_from_s3("PROCEDURES_ICD")
-   val services = Utils.csv_from_s3("SERVICES")
-   val transfers = Utils.csv_from_s3("TRANSFERS")
-   */
-
-  /*
-
-      /*
-      // For 'nice' output of just which lab items are relevant (and the
-      // human-readable form):
-      labs_patients_ok.
-        dropDuplicates("ITEMID").
-        join(d_labitems, "ITEMID").
-        sort(desc("count")).
-        write.
-        mode(SaveMode.Overwrite).
-        parquet(f"${config.outputPath}/labs.parquet")
-      // and then both labs & admissions:
-      labs_good_df.
-        write.
-        mode(SaveMode.Overwrite).
-        parquet(f"${config.outputPath}/labs_and_admissions.parquet")
-       */
-
-      /*
-      // How many unique ICD-9 diagnoses accompany each admission & lab
-      // item?
-      val icd9_per_pair : DataFrame = labs_good_df.
-        join(diagnoses_icd, "HADM_ID").
-        groupBy("HADM_ID", "ITEMID").
-        count.
-        withColumnRenamed("count", "icd9_unique_count")
-      icd9_per_pair.
-        write.
-        mode(SaveMode.Overwrite).
-        parquet(f"${config.outputPath}/icd9_per_pair.parquet")
-
-      // How many unique (admission, lab items) accompany each ICD-9
-      // code present?  ('lab item' here refers to the entire
-      // time-series, not every sample from it.)
-      val pairs_per_icd9 : DataFrame = labs_good_df.
-        join(diagnoses_icd, "HADM_ID").
-        groupBy("ICD9_CODE").
-        count.
-        withColumnRenamed("count", "adm_and_lab_count").
-        // Make a little more human-readable:
-        join(d_icd_diagnoses, "ICD9_CODE").
-        sort(desc("adm_and_lab_count"))
-      pairs_per_icd9.cache()
-      pairs_per_icd9.
-        write.
-        parquet(f"${config.outputPath}/pairs_per_icd9.parquet")
-
-      // How many unique (admission, lab items) accompany each ICD-9
-      // *category* present?
-      val pairs_per_icd9_category : DataFrame = labs_good_df.
-        join(diagnoses_icd, "HADM_ID").
-        groupBy("ICD9_CATEGORY").
-        count.
-        withColumnRenamed("count", "adm_and_lab_count").
-        sort(desc("adm_and_lab_count"))
-      pairs_per_icd9_category.cache()
-      pairs_per_icd9_category.
-        write.
-        mode(SaveMode.Overwrite).
-        parquet(f"${config.outputPath}/pairs_per_icd9_category.parquet")
-       */
-   */
-
-    // To bypass:
-    /*
-     val labs_patients_ok = spark.read.parquet(f"${config.outputPath}/labs.parquet")
-     val labs_good_df = spark.read.parquet(f"${config.outputPath}/labs_and_admissions.parquet")
-     val icd9_per_pair = spark.read.parquet(f"${config.outputPath}/icd9_per_pair.parquet")
-     val pairs_per_icd9 = spark.read.parquet(f"${config.outputPath}/pairs_per_icd9.parquet")
-     val pairs_per_icd9_category = spark.read.parquet(f"${config.outputPath}/pairs_per_icd9_category.parquet")
-     */
-    
   
+  // Gaussian process regression
+  def runGPR(spark : SparkSession, config : Config, data : RDD[PatientTimeSeries]) : Unit = {
+
+    // First, perform Gaussian process regression over the input data,
+    // thus producing a model for each time series:
+    val sigma2 = 0.012
+    val alpha = 0.189
+    val tau = 1.246
+    // TODO: Pull these out to commandline options?  Or something
+    val gprModels = data.map { p: PatientTimeSeries =>
+      // Train a model for every time-series in training set:
+      val t@(ll, matL, matA) = Utils.gprTrain(p.warpedSeries, sigma2, alpha, tau)
+
+      (p, matL, matA)
+    }
+    // gprModels then has (PatientTimeSeries, L matrix, A matrix) for
+    // every time-series.
+
+    // Next: For each time-series, generate new time values from a
+    // regular sampling of the time range (plus some padding at each
+    // end).  From each set of resampled time values, generate
+    // predicted values with gprPredict (and the time-series'
+    // respective Gaussian process model computed above).
+
+    // How many days before & after do we interpolate for?
+    val padding = 2.5
+    // What interval (in days) do we interpolate with?
+    val interval = 0.25
+    // TODO: Make these commandline options too?
+
+    // Create a new time-series with these predictions:
+    val tsInterpolated = gprModels.map { case (p, matL, matA) =>
+      val ts = p.warpedSeries.map(_._1)
+      val ts2 = (ts.min - padding) to (ts.max + padding) by interval
+      val predictions = Utils.gprPredict(ts2, ts, matL, matA, sigma2, alpha, tau)
+      PatientTimeSeriesPredicted(p.adm_id, p.item_id, p.subject_id, p.unit,
+        p.icd9category,
+        (ts2, predictions.map(_._1), predictions.map(_._2)).zipped.toList)
+    }
+
+    val tsInterp_flat : DataFrame = Utils.
+      flattenPredictedTimeseries(spark, tsInterpolated)
+    tsInterp_flat.
+      write.
+      mode(SaveMode.Overwrite).
+      parquet(f"${config.outputPath}/labs_cohort_predict_${config.suffix}.parquet")
+    Utils.csvOverwrite(tsInterp_flat).
+      save(f"${config.outputPath}/labs_cohort_predict_${config.suffix}.csv")
+  }
 }
