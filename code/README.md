@@ -1,6 +1,9 @@
 mimic3_phenotyping
 ==================
 
+- Background - Lasko's paper, my paper (arxiv?)
+- Don't mention CSE8803-O01
+
 Prerequisites
 ----
 
@@ -11,10 +14,14 @@ Prerequisites
 Building
 ----
 
-- sbt
+- sbt compile, sbt package
 
 Running
 ----
+
+- Amazon EMR or local?
+- Filenames contain ICD-9 codes and LOINC code if they are cohort-specific
+- Python code is run after
 
 Example run
 ----
