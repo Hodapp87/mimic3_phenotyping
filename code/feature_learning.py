@@ -30,7 +30,7 @@ from keras.utils.visualize_util import plot
 #suffix = "276_427_50820"
 #suffix = "276_427_51268"
 data_dir = "../data/"
-suffix = "cohort_518_584_11558_4"
+suffix = "cohort_518_584_11558-4"
 
 df = pandas.read_csv(
     utils.get_single_csv("%s/%s_predict.csv" % (data_dir, suffix)))

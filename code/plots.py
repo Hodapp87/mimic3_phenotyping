@@ -82,7 +82,7 @@ def plots():
 
     #suffix = "276_427_50820"
     data_dir = "../data/"
-    suffix = "cohort_518_584_11558_4"
+    suffix = "cohort_518_584_11558-4"
 
     ts_raw = pandas.read_csv(
         utils.get_single_csv("%s/%s_train.csv" % (data_dir, suffix)))
