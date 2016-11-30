@@ -155,7 +155,9 @@ case object Utils {
 
     // Standardize values to mean 0, stdev 1:
     val ymean = y_raw.sum / y_raw.size
-    val ystd = Math.sqrt(y_raw.map(a => (a - ymean)*(a - ymean)).sum)
+    val ystd_ = Math.sqrt(y_raw.map(a => (a - ymean)*(a - ymean)).sum)
+    // The case of no deviation can happen, so just ignore it:
+    val ystd = if (ystd_ > 1e-8) ystd_ else 1
     val y = y_raw.map(a => (a - ymean)/ystd)
     
     // Refer to Rasmussen & Williams, algorithm 2.1:
