@@ -120,9 +120,24 @@ case object Utils {
     covarMtx(x1, x2, fn)
   }
 
+  case class GPRModel(
+    // Model hyperparameters sigma^2, alpha, tau:
+    sigma2 : Double,
+    alpha : Double,
+    tau : Double,
+    // L matrix:
+    L : BDM[Double],
+    // A matrix (alpha):
+    A : BDM[Double],
+    // Log marginal likelihood of model:
+    log_likelihood : Double,
+    // Mean & stdev of data (needed to reverse transform later):
+    mean : Double,
+    stdev : Double
+  )
+
   def gprTrain(ts : Iterable[(Double, Double)],
-    sigma2 : Double, alpha : Double, tau : Double) :
-      (Double, BDM[Double], BDM[Double]) =
+    sigma2 : Double, alpha : Double, tau : Double) : GPRModel = 
   {
     /** 
       * Train a model for Gaussian process regression using algorithm
@@ -135,9 +150,14 @@ case object Utils {
       * hyperparameter alpha)a.  If 'ts' has N elements, then 'L' will
       * have dimensions N x N, and 'A' will have dimensions N x 1.
       */
-    // TODO: Comment more fully.
     // ts is (time, value).
-    val (x, y) = ts.unzip
+    val (x, y_raw) = ts.unzip
+
+    // Standardize values to mean 0, stdev 1:
+    val ymean = y_raw.sum / y_raw.size
+    val ystd = Math.sqrt(y_raw.map(a => (a - ymean)*(a - ymean)).sum)
+    val y = y_raw.map(a => (a - ymean)/ystd)
+    
     // Refer to Rasmussen & Williams, algorithm 2.1:
     val n : Int = x.size
     //val K = squaredExpCovar(x, x, sigma2f, sigma2n, l)
@@ -150,12 +170,12 @@ case object Utils {
     // because indices can't go on the expression for some reason.
     val prod = ym.t * A
     val ll = -(prod(0,0) / 2.0) - sum(log(diag(L))) - (n * log(2*Math.PI))/2
-    (ll, L, A)
+
+    GPRModel(sigma2, alpha, tau, L, A, ll, ymean, ystd)
   }
 
   def gprPredict(xTest : Iterable[Double], xTrain : Iterable[Double],
-    L : BDM[Double], A : BDM[Double], sigma2 : Double, alpha : Double,
-    tau : Double) : Iterable[(Double, Double)] = {
+    gpr : GPRModel) : Iterable[(Double, Double)] = {
     /**
       * Predict the means and variances for test inputs (as time
       * values in 'xTest'), given previously fitted L and A from
@@ -166,13 +186,13 @@ case object Utils {
       */
 
     // Compute k*, covariance between training points & test points:
-    val ks = rationalQuadraticCovar(xTrain, xTest, sigma2, alpha, tau)    
+    val ks = rationalQuadraticCovar(xTrain, xTest, gpr.sigma2, gpr.alpha, gpr.tau)
     //val ks = squaredExpCovar(xTrain, xTest, sigma2f, sigma2n, l)
     // Compute f*:
-    val fs = ks.t * A
+    val fs = ks.t * gpr.A
     // Compute v:
-    val v = L \ ks
-    val covar = rationalQuadraticCovar(xTest, xTest, sigma2, alpha, tau) - v.t * v    
+    val v = gpr.L \ ks
+    val covar = rationalQuadraticCovar(xTest, xTest, gpr.sigma2, gpr.alpha, gpr.tau) - v.t * v    
     // val covar = squaredExpCovar(xTest, xTest, sigma2f, sigma2n, l) - v.t * v
 
     // I don't know that I actually need to compute the *entire*
@@ -180,8 +200,15 @@ case object Utils {
     // covariance of every xTest with itself.  Also, this computation
     // may not even be correct outside of the diagonal.
 
-    val means = fs.valuesIterator
-    val variances = diag(covar).valuesIterator
+    // Collect means and variances, and also use the model's
+    // mean/stdev to undo the standardization applied in regression:
+
+    val means = fs.valuesIterator.map { m =>
+      (m * gpr.stdev) + gpr.mean
+    }
+    val variances = diag(covar).valuesIterator.map { v =>
+      v * gpr.stdev * gpr.stdev
+    }
     means.zip(variances).toList
   }
 

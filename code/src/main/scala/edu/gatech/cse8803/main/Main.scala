@@ -345,11 +345,7 @@ object Main {
           // Separate out times and values, and pass forward both
           // "original" time series and warped time series:
           val series = series_raw.toSeq.sortBy(_._1)
-          val (times, values2) = series.unzip
-          // Subtract mean from values:
-          // TODO: This should really be done elsewhere
-          val ymean = values2.sum / values2.size
-          val values = values2.map(_ - ymean)
+          val (times, values) = series.unzip
           val start = times.min
           val relTimes = times.map(_ - start)
           val warpedTimes = Utils.polynomialTimeWarp(relTimes.toSeq)
@@ -453,13 +449,12 @@ object Main {
         //val grid = paramGridVar.value
         grid.
           map { case t@(sigma2, alpha, tau) =>
-            // ._1 of result of gprTrain below is just the
-            // log-likelihood, which we optimize over.  We reuse the
-            // model parameters elsewhere, but they're fast enough to
-            // recompute that there's not really any point in storing
-            // them.  With more ridiculous covariance functions, or
-            // much longer time-series, that may not be true.
-            (t, Utils.gprTrain(s, sigma2, alpha, tau)._1)
+            // We are only concerned with log-likelihood here.  We
+            // reuse the model parameters elsewhere, but they're fast
+            // enough to recompute that there's not really any point
+            // in storing them.  With more ridiculous covariance
+            // functions or longer time-series, that may not be true.
+            (t, Utils.gprTrain(s, sigma2, alpha, tau).log_likelihood)
         }
       }.reduceByKey(_ + _)
 
@@ -500,12 +495,10 @@ object Main {
     // TODO: Pull these out to commandline options?  Or something
     val gprModels = data.map { p: PatientTimeSeries =>
       // Train a model for every time-series in training set:
-      val t@(ll, matL, matA) = Utils.gprTrain(p.warpedSeries, sigma2, alpha, tau)
-
-      (p, matL, matA)
+      (p, Utils.gprTrain(p.warpedSeries, sigma2, alpha, tau))
     }
-    // gprModels then has (PatientTimeSeries, L matrix, A matrix) for
-    // every time-series.
+    // gprModels then has (PatientTimeSeries, GPR model) for every
+    // time-series.
 
     // Next: For each time-series, generate new time values from a
     // regular sampling of the time range (plus some padding at each
@@ -520,10 +513,10 @@ object Main {
     // TODO: Make these commandline options too?
 
     // Create a new time-series with these predictions:
-    val tsInterpolated = gprModels.map { case (p, matL, matA) =>
+    val tsInterpolated = gprModels.map { case (p, model) =>
       val ts = p.warpedSeries.map(_._1)
       val ts2 = (ts.min - padding) to (ts.max + padding) by interval
-      val predictions = Utils.gprPredict(ts2, ts, matL, matA, sigma2, alpha, tau)
+      val predictions = Utils.gprPredict(ts2, ts, model)
       PatientTimeSeriesPredicted(p.adm_id, p.item_id, p.subject_id, p.unit,
         p.icd9category,
         (ts2, predictions.map(_._1), predictions.map(_._2)).zipped.toList)
