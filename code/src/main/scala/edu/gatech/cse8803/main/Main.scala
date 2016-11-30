@@ -434,19 +434,21 @@ object Main {
         // it can't find the parameter this early.
      }
 
-    // Enabling the below (and swapping paramGrid for
-    // paramGridVar.value in labs_ll) causes a problem like
+    // A problem like
     // https://stackoverflow.com/questions/34329299/issuing-spark-submit-on-command-line-completes-tasks-but-never-returns-prompt
-    // This problem goes away on much smaller version of 'paramGrid'.
-    // I have no idea what is causing this.
+    // is occurring.  This problem goes away on much smaller version
+    // of 'paramGrid', and at least once I saw it go away when I used
+    // paramGrid rather than paramGridVar.value in labs_ll (and
+    // removed sc.broadcast below).  I have no idea what is causing
+    // this.
 
-    // val paramGridVar = sc.broadcast(paramGrid)
+    val paramGridVar = sc.broadcast(paramGrid)
 
     val labs_ll : RDD[((Double, Double, Double), Double)] =
       labs_cohort.flatMap { series =>
         val s = series.warpedSeries
-        val grid = paramGrid
-        //val grid = paramGridVar.value
+        //val grid = paramGrid
+        val grid = paramGridVar.value
         grid.
           map { case t@(sigma2, alpha, tau) =>
             // We are only concerned with log-likelihood here.  We
