@@ -197,7 +197,7 @@ object Main {
     if (config.runGPR) {
 
       val labs_cohort_train : RDD[PatientTimeSeries] = sc.
-        objectFile(f"${config.outputPath}/${config.suffix}_test_rdd")
+        objectFile(f"${config.outputPath}/${config.suffix}_train_rdd")
 
       runGPR(spark, config, labs_cohort_train)
     }
