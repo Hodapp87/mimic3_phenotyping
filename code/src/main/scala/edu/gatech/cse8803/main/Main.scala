@@ -36,9 +36,8 @@ case class Config(
 object Main {
   def main(args: Array[String]): Unit = {
 
-    // TODO: Rename "scopt"
     val parser = new OptionParser[Config]("mimic3_phenotyping") {
-      head("scopt", "3.x")
+      head("mimic3_phenotyping", "1.0")
       opt[String]('i', "mimic_input").required().action { (x,c) =>
         c.copy(mimicInput = x)
       }.text("Path to the MIMIC-III datasets (.csv.gz); use file:/// for local paths")
@@ -141,17 +140,13 @@ object Main {
     // time-series that we'll consider for a given admission & item?
     val lab_min_series = 3
 
-    // For training & test split:
-    val randomSeed : Long = 0x12345
-    val trainRatio = 0.7
-
     /***********************************************************************
      * Loading & transforming data
      ***********************************************************************/
 
-    // These are small enough to cache:
     val d_icd_diagnoses = Utils.csv_from_s3(
-      spark, f"${config.mimicInput}/D_ICD_DIAGNOSES.csv.gz", Some(Schemas.d_icd_diagnoses))
+      spark, f"${config.mimicInput}/D_ICD_DIAGNOSES.csv.gz",
+      Some(Schemas.d_icd_diagnoses))
     d_icd_diagnoses.cache()
 
     val d_labitems = Utils.csv_from_s3(
@@ -164,7 +159,8 @@ object Main {
     // For DIAGNOSES_ICD, also get the ICD9 category (which we reuse
     // in various places):
     val diagnoses_icd = Utils.csv_from_s3(
-      spark, f"${config.mimicInput}/DIAGNOSES_ICD.csv.gz", Some(Schemas.diagnoses)).
+      spark, f"${config.mimicInput}/DIAGNOSES_ICD.csv.gz",
+      Some(Schemas.diagnoses)).
       withColumn("ICD9_CATEGORY", $"ICD9_CODE".substr(0, 3))
 
     // Get (HADM_ID, ITEM_ID) for those admissions and lab items which
@@ -189,49 +185,26 @@ object Main {
     }
 
     if (config.runGPR) {
-      println("Loading saved data for diag & labs...")
-      val diag_cohort = spark.read.parquet(f"${config.outputPath}/diag_cohort_${config.suffix}.parquet")
-      val labs_cohort : RDD[PatientTimeSeries] = sc.
-        objectFile(f"${config.outputPath}/labs_cohort_${config.suffix}_rdd")
-      val labs_cohort_flat = spark.read.parquet(f"${config.outputPath}/labs_cohort_${config.suffix}.parquet")
-      
-      // Separate training & test:
-      val labs_cohort_split = labs_cohort.map { ps: PatientTimeSeries =>
-        ((ps.adm_id, ps.item_id, ps.unit), ps)
-      }.sortByKey(true).
-        map(_._2).
-        randomSplit(
-          Array(trainRatio, 1.0 - trainRatio), randomSeed)
-      val labs_cohort_train = labs_cohort_split(0)
-      val labs_cohort_test  = labs_cohort_split(1)
 
-      // Save training & test to disk (they'll be needed later):
-      val train_flat : DataFrame = Utils.flattenTimeseries(spark, labs_cohort_train)
-      Utils.csvOverwrite(train_flat).
-        save(f"${config.outputPath}/labs_cohort_train_${config.suffix}.csv")
-      val test_flat : DataFrame = Utils.flattenTimeseries(spark, labs_cohort_test)
-      Utils.csvOverwrite(test_flat).
-        save(f"${config.outputPath}/labs_cohort_test_${config.suffix}.csv")
-      
+      val labs_cohort_train : RDD[PatientTimeSeries] = sc.
+        objectFile(f"${config.outputPath}/labs_cohort_${config.suffix}_train_rdd")
+
       runGPR(spark, config, labs_cohort_train)
     }
 
     if (config.optimizeGPR) {
-      // TODO: Put this someplace else (it's duplicated)
-      println("Loading saved data for diag & labs...")
-      val diag_cohort = spark.read.parquet(f"${config.outputPath}/diag_cohort_${config.suffix}.parquet")
-      val labs_cohort : RDD[PatientTimeSeries] = sc.
-        objectFile(f"${config.outputPath}/labs_cohort_${config.suffix}_rdd")
-      val labs_cohort_flat = spark.read.parquet(f"${config.outputPath}/labs_cohort_${config.suffix}.parquet")
+      val labs_cohort_train : RDD[PatientTimeSeries] = sc.
+        objectFile(f"${config.outputPath}/labs_cohort_${config.suffix}_train_rdd")
 
-      optimizeHyperparams(spark, config, labs_cohort)
+      optimizeHyperparams(spark, config, labs_cohort_train)
     }
 
   }
 
   def computeCohort(spark : SparkSession, config : Config,
     adm_and_labs : DataFrame, d_labitems : DataFrame,
-    diagnoses_icd : DataFrame, labevents : DataFrame) : Unit =
+    diagnoses_icd : DataFrame, labevents : DataFrame,
+    trainRatio : Double = 0.7) : Unit =
   {
     import spark.implicits._
 
@@ -325,7 +298,29 @@ object Main {
       parquet(f"${config.outputPath}/labs_cohort_${config.suffix}.parquet")
     Utils.csvOverwrite(labs_cohort_flat).
       save(f"${config.outputPath}/labs_cohort_${config.suffix}.csv")
-      (diag_cohort, labs_cohort, labs_cohort_flat)
+
+    val randomSeed : Long = 0x12345
+
+    // Separate training & test:
+    val labs_cohort_split = labs_cohort.map { ps: PatientTimeSeries =>
+      ((ps.adm_id, ps.item_id, ps.unit), ps)
+    }.sortByKey(true).
+      map(_._2).
+      randomSplit(
+        Array(trainRatio, 1.0 - trainRatio), randomSeed)
+    val labs_cohort_train = labs_cohort_split(0)
+    val labs_cohort_test  = labs_cohort_split(1)
+    // Save training & test to disk (they'll be needed later):
+    labs_cohort_train.
+      saveAsObjectFile(f"${config.outputPath}/labs_cohort_train_${config.suffix}_rdd")
+    labs_cohort_test.
+      saveAsObjectFile(f"${config.outputPath}/labs_cohort_test_${config.suffix}_rdd")
+    val train_flat : DataFrame = Utils.flattenTimeseries(spark, labs_cohort_train)
+    Utils.csvOverwrite(train_flat).
+      save(f"${config.outputPath}/labs_cohort_train_${config.suffix}.csv")
+    val test_flat : DataFrame = Utils.flattenTimeseries(spark, labs_cohort_test)
+    Utils.csvOverwrite(test_flat).
+      save(f"${config.outputPath}/labs_cohort_test_${config.suffix}.csv")
   }
 
   def genMatrix(spark : SparkSession, config : Config, adm_and_labs : DataFrame,
@@ -334,15 +329,6 @@ object Main {
     import spark.implicits._
 
     val lab_min_patients = 30
-    
-    // To bypass:
-    /*
-     val labs_patients_ok = spark.read.parquet(f"${config.outputPath}/labs.parquet")
-     val labs_good_df = spark.read.parquet(f"${config.outputPath}/labs_and_admissions.parquet")
-     val icd9_per_pair = spark.read.parquet(f"${config.outputPath}/icd9_per_pair.parquet")
-     val pairs_per_icd9 = spark.read.parquet(f"${config.outputPath}/pairs_per_icd9.parquet")
-     val pairs_per_icd9_category = spark.read.parquet(f"${config.outputPath}/pairs_per_icd9_category.parquet")
-     */
     
     // Get ITEM_ID for those lab items which meet both
     // 'lab_min_series' and 'lab_min_patients'.
@@ -609,4 +595,15 @@ object Main {
         parquet(f"${config.outputPath}/pairs_per_icd9_category.parquet")
        */
    */
+
+    // To bypass:
+    /*
+     val labs_patients_ok = spark.read.parquet(f"${config.outputPath}/labs.parquet")
+     val labs_good_df = spark.read.parquet(f"${config.outputPath}/labs_and_admissions.parquet")
+     val icd9_per_pair = spark.read.parquet(f"${config.outputPath}/icd9_per_pair.parquet")
+     val pairs_per_icd9 = spark.read.parquet(f"${config.outputPath}/pairs_per_icd9.parquet")
+     val pairs_per_icd9_category = spark.read.parquet(f"${config.outputPath}/pairs_per_icd9_category.parquet")
+     */
+    
+  
 }
