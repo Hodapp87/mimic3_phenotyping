@@ -423,9 +423,9 @@ object Main {
     // gradients.
 
     val paramGrid : Array[(Double, Double, Double)] = new ParamGridBuilder().
-      addGrid(sigma2Param, 0.05 to 2.0 by 0.05).
-      addGrid(alphaParam, 0.05 to 2.00 by 0.05).
-      addGrid(tauParam, 0.2 to 2.0 by 0.05).
+      addGrid(sigma2Param, 0.05 to 2.0 by 0.075).
+      addGrid(alphaParam, 0.05 to 2.00 by 0.075).
+      addGrid(tauParam, 0.2 to 2.0 by 0.075).
       build.
       map { pm =>
         (pm.get(sigma2Param).get,
@@ -467,9 +467,12 @@ object Main {
       )
 
     // Write the hyperparameters to disk:
-    val hyperDf = sc.parallelize(Seq(optimal)).
-      map { case ((sig2, a, t), ll) => (sig2, a, t, ll, config.loincTest) }.
-      toDF("sigma2", "alpha", "tau", "log_likelihood", "LOINC_CODE");
+    val hyperDf : DataFrame = spark.createDataFrame(
+      sc.parallelize(Seq(optimal)).
+        map { case ((sig2, a, t), ll) =>
+          Row(sig2, a, t, ll, config.loincTest)
+        },
+      Schemas.hyperparams)
 
     val (sig2, a, t) = optimal._1
     println("Optimized hyperparameters:")
@@ -487,12 +490,26 @@ object Main {
   // Gaussian process regression
   def runGPR(spark : SparkSession, config : Config, data : RDD[PatientTimeSeries]) : Unit = {
 
+    // Get previously added hyperparameters:
+    val hpDf : DataFrame = spark.
+      read.
+      format("com.databricks.spark.csv").
+      option("header", "true").
+      schema(Schemas.hyperparams).
+      load(f"${config.outputPath}/${config.suffix}_hyperparams.csv")
+
+    val hpRow = hpDf.take(1)(0)
+    val sigma2 = hpRow.getAs[Double]("sigma2")
+    val alpha = hpRow.getAs[Double]("alpha")
+    val tau = hpRow.getAs[Double]("tau")
+
+    println("Read hyperparameters:")
+    println(f"sigma^2 = ${sigma2}")
+    println(f"alpha = ${alpha}")
+    println(f"tau = ${tau}")
+
     // First, perform Gaussian process regression over the input data,
     // thus producing a model for each time series:
-    val sigma2 = 0.03
-    val alpha = 1.81
-    val tau = 1.91
-    // TODO: Pull these out to commandline options?  Or something
     val gprModels = data.map { p: PatientTimeSeries =>
       // Train a model for every time-series in training set:
       (p, Utils.gprTrain(p.warpedSeries, sigma2, alpha, tau))
