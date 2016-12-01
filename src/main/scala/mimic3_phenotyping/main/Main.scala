@@ -1,10 +1,10 @@
 // (c) 2016 Chris Hodapp, chodapp3@gatech.edu
 
-package edu.gatech.cse8803.main
+package mimic3_phenotyping.main
 
-import edu.gatech.cse8803.util.Utils
-import edu.gatech.cse8803.util.Schemas
-import edu.gatech.cse8803.types._
+import mimic3_phenotyping.util.Utils
+import mimic3_phenotyping.util.Schemas
+import mimic3_phenotyping.types._
 
 import org.apache.spark.ml.param._
 import org.apache.spark.ml.tuning._
@@ -123,7 +123,7 @@ object Main {
     val spark = SparkSession.builder.
       //master("yarn").
       //master("local[*]").
-      appName("CSE-8803 project").
+      appName("MIMIC-III phenotyping").
       getOrCreate()
     val sc = spark.sparkContext
     import spark.implicits._

@@ -1,6 +1,6 @@
 // (c) 2016 Chris Hodapp, chodapp3@gatech.edu
 
-package edu.gatech.cse8803.types
+package mimic3_phenotyping.types
 
 case class PatientTimeSeries(
   adm_id: Int,

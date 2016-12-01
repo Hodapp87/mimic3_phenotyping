@@ -1,6 +1,6 @@
 // (c) 2016 Chris Hodapp, chodapp3@gatech.edu
 
-package edu.gatech.cse8803.util
+package mimic3_phenotyping.util
 
 import org.apache.spark.sql.types._
 

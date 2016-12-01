@@ -1,5 +1,4 @@
-// TODO: Change this?
-name := "cse8803_project"
+name := "mimic3_phenotyping"
 
 version := "1.0"
 
@@ -29,13 +28,13 @@ assemblyMergeStrategy in assembly := {
  case x => MergeStrategy.first
 }
 
-mainClass in assembly := Some("edu.gatech.cse8803.main")
+mainClass in assembly := Some("mimic3_phenotyping.main")
 
 // spark-shell --packages "com.cloudera.sparkts:sparkts:0.4.0"
 // Perhaps also consult:
 // https://stackoverflow.com/questions/37643831/how-to-run-spark-shell-with-local-packages
 
-// spark-submit --master "local[*]" --repositories https://oss.sonatype.org/content/groups/public/ --packages "com.github.scopt:scopt_2.11:3.5.0" target/scala-2.11/cse8803_project_2.11-1.0.jar
+// spark-submit --master "local[*]" --repositories https://oss.sonatype.org/content/groups/public/ --packages "com.github.scopt:scopt_2.11:3.5.0" target/scala-2.11/scala-2.11/mimic3_phenotyping_2.11-1.0.jar
 
 //val output_dir : String = "s3://bd4h-mimic3/cohort_518_584_50820/"
 //val mimic3_dir : String = "s3://bd4h-mimic3/"

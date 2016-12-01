@@ -1,8 +1,8 @@
 // (c) 2016 Chris Hodapp, chodapp3@gatech.edu
 
-package edu.gatech.cse8803.util
+package mimic3_phenotyping.util
 
-import edu.gatech.cse8803.types._
+import mimic3_phenotyping.types._
 
 import breeze.linalg.{DenseMatrix => BDM, sum}
 import breeze.linalg._
