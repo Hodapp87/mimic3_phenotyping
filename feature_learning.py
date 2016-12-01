@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 
 # (c) 2016 Chris Hodapp, chodapp3@gatech.edu
 
@@ -21,7 +21,10 @@ import sklearn.manifold
 import sklearn.preprocessing
 
 # Make sure pydot-ng is installed for the below
-from keras.utils.visualize_util import plot
+try:
+    from keras.utils.visualize_util import plot
+except:
+    print("Couldn't import keras.utils.visualize_util")
 
 #######################################################################
 # Loading data
@@ -29,8 +32,9 @@ from keras.utils.visualize_util import plot
 
 #suffix = "276_427_50820"
 #suffix = "276_427_51268"
-data_dir = "../data/"
-suffix = "cohort_518_584_11558-4"
+data_dir = "./data/"
+#suffix = "cohort_518_584_11558-4"
+suffix = "cohort_428_584_1742-6"
 
 df = pandas.read_csv(
     utils.get_single_csv("%s/%s_predict.csv" % (data_dir, suffix)))
@@ -79,7 +83,7 @@ patch_length = int(math.ceil(2 * padding / interval))
 # So, assign a weight to each time-series based on how many patches
 # are in it (in effect, make each patch equally likely):
 num_patches = numpy.array([len(ts[1])-patch_length for ts in gr])
-weights = num_patches / num_patches.sum()
+weights = num_patches / float(num_patches.sum())
 
 # And then select 'patch_count' indices, each one for a particular
 # time-series:

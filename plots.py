@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 
 # (c) 2016 Chris Hodapp, chodapp3@gatech.edu
 
@@ -75,15 +75,16 @@ def gpr_plot_grid(fig, raw_groups, gpr_groups, rows = 8, cols = 8, random = True
     plt.tight_layout()
 
 def plots():
-    numpy.random.seed(0x12346)
+    numpy.random.seed(0x123456)
     
     #######################################################################
     # Loading data
     #######################################################################
 
     #suffix = "276_427_50820"
-    data_dir = "../data/"
-    suffix = "cohort_518_584_11558-4"
+    data_dir = "./data/"
+    #suffix = "cohort_518_584_11558-4"
+    suffix = "cohort_428_584_1742-6"
 
     ts_raw = pandas.read_csv(
         utils.get_single_csv("%s/%s_train.csv" % (data_dir, suffix)))
