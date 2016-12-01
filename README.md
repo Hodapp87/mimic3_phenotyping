@@ -3,17 +3,24 @@ mimic3_phenotyping
 
 - Background - Lasko's paper, my paper (arxiv?)
 
-Prerequisites
+Requirements
 ----
 
-- MIMIC-III dataset
-- sbt & Spark
-- Python, Keras, scikit-learn
+- The [MIMIC-III dataset](http://mimic.physionet.org/gettingstarted/access/)
+- [SBT](http://www.scala-sbt.org/sbt) (Scala Build Tools) >= 0.13;
+  other versions may work, but I have not tried them.
+- Apache Spark
+- Python 2.7 or 3.x, and the following packages (`pip` versions should be fine):
+  - [Keras](https://keras.io/) and ideally a GPU-enabled backend (Theano or TensorFlow)
+  - [scikit-learn](http://scikit-learn.org/stable/index.html)
+  - pydot-ng (optional)
 
 Building
 ----
 
-- sbt compile, sbt package
+`sbt compile` should handle pulling dependencies and building
+everything.  `sbt package` should produce a JAR that `spark-submit`
+can handle.
 
 Running
 ----
@@ -32,5 +39,5 @@ spark-submit --master "local[*]"
     target/scala-2.11/mimic3_phenotyping_2.11-1.0.jar
     -i "file:////mnt/dev/mimic3/"
     -o "file:///home/hodapp/source/bd4h-project-code/data/"
-    -m -c --icd9a 518 --icd9b 584 -l "11558-4"
+    -m -c -h --icd9a 518 --icd9b 584 -l "11558-4"
 ```
