@@ -17,17 +17,8 @@ def gpr_plot(raw_subdf, gpr_subdf, ax = None, labels = True, legend = True):
     Gaussian Process Regression interpolated sub-dataframe.  They are
     assumed to be from the same group, but are not checked.
     """
-    ax1 = raw_subdf.plot.line(x = "CHARTTIME", y = "VALUENUM", ax = ax, label = "Raw", color = "Black")
+    ax1 = raw_subdf.plot.line(x = "CHARTTIME", y = "VALUENUM", ax = ax, label = "Raw", color = "Black", alpha=0.7)
     ax2 = raw_subdf.plot.line(x = "CHARTTIME_warped", y = "VALUENUM", ax=ax1, label = "Warped", color = "Red")
-    if labels:
-        plt.xlabel("Relative time (days)")
-        # TODO: Get LOINC code maybe?
-        plt.ylabel("Value (%s)" % (raw_subdf["VALUEUOM"].iloc[0],))
-    else:
-        plt.xlabel("")
-        plt.ylabel("")
-        plt.setp(ax1.get_xticklabels(), visible=False)
-        plt.setp(ax1.get_yticklabels(), visible=False)
     # Add error bars to GPR:
     gpr_subdf2 = gpr_subdf.copy()
     gpr_subdf2["MEAN+"] = gpr_subdf2["MEAN"] + numpy.sqrt(gpr_subdf2["VARIANCE"])
@@ -51,10 +42,18 @@ def gpr_plot(raw_subdf, gpr_subdf, ax = None, labels = True, legend = True):
         # and this hackish crap:
         lines, labels = ax1.get_legend_handles_labels()
         ax1.legend(lines[:3], labels[:3], loc='best')
+    if labels:
+        plt.xlabel("Relative time (days)")
+        # TODO: Get LOINC code maybe?
+        plt.ylabel("Value (%s)" % (raw_subdf["VALUEUOM"].iloc[0],))
+    else:
+        plt.xlabel("")
+        plt.ylabel("")
+        plt.setp(ax1.get_xticklabels(), visible=False)
+        plt.setp(ax1.get_yticklabels(), visible=False)
     return ax5
 
 def gpr_plot_grid(fig, raw_groups, gpr_groups, rows = 8, cols = 8, random = True):
-    numpy.random.seed(0x12345)
     groups = list(raw_groups.groups.keys())
     groups.sort()
     outer_grid = gridspec.GridSpec(rows, cols, wspace=0.0, hspace=0.0)
@@ -76,6 +75,8 @@ def gpr_plot_grid(fig, raw_groups, gpr_groups, rows = 8, cols = 8, random = True
     plt.tight_layout()
 
 def plots():
+    numpy.random.seed(0x12346)
+    
     #######################################################################
     # Loading data
     #######################################################################
@@ -104,8 +105,11 @@ def plots():
     plt.close()
 
     # Just pick something:
-    idx = 100
-    group_id = list(ts_raw_groups.groups.keys())[idx]
+    l = list(ts_raw_groups.groups.keys())
+    l.sort()
+    idx = numpy.random.randint(len(l))
+    print(idx)
+    group_id = l[idx]
     gpr_plot(ts_raw_groups.get_group(group_id), ts_gpr_groups.get_group(group_id))
     plt.title(str(group_id))
     plt.savefig("%s/%s_timeseries_single.png" % (data_dir, suffix), bbox_inches='tight')

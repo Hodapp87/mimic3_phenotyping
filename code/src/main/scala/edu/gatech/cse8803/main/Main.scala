@@ -421,6 +421,7 @@ object Main {
     // (like Spark already has built in).  Or, perhaps Spark has some
     // optimization method built in that can numerically estimate
     // gradients.
+
     val paramGrid : Array[(Double, Double, Double)] = new ParamGridBuilder().
       addGrid(sigma2Param, 0.05 to 2.0 by 0.05).
       addGrid(alphaParam, 0.05 to 2.00 by 0.05).
@@ -447,10 +448,7 @@ object Main {
     val labs_ll : RDD[((Double, Double, Double), Double)] =
       labs_cohort.flatMap { series =>
         val s = series.warpedSeries
-        //val grid = paramGrid
-        val grid = paramGridVar.value
-        grid.
-          map { case t@(sigma2, alpha, tau) =>
+        paramGridVar.value.map { case t@(sigma2, alpha, tau) =>
             // We are only concerned with log-likelihood here.  We
             // reuse the model parameters elsewhere, but they're fast
             // enough to recompute that there's not really any point
@@ -491,9 +489,9 @@ object Main {
 
     // First, perform Gaussian process regression over the input data,
     // thus producing a model for each time series:
-    val sigma2 = 0.012
-    val alpha = 0.189
-    val tau = 1.246
+    val sigma2 = 0.03
+    val alpha = 1.81
+    val tau = 1.91
     // TODO: Pull these out to commandline options?  Or something
     val gprModels = data.map { p: PatientTimeSeries =>
       // Train a model for every time-series in training set:

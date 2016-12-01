@@ -132,8 +132,8 @@ ts_shape = (patch_length * 2,)
 raw_input_tensor = Input(shape=ts_shape, name="raw_input")
 encode1_layer = Dense(hidden1,
                       activation='sigmoid',
-                      activity_regularizer=activity_l1(0.00005),
-                      W_regularizer=l2(0.0002),
+                      activity_regularizer=activity_l1(0.00003),
+                      W_regularizer=l2(0.0003),
                       name="encode1")
 encode1_tensor = encode1_layer(raw_input_tensor)
 
@@ -148,6 +148,9 @@ autoencoder1.compile(optimizer='adadelta', loss='mse')
 plot(autoencoder1,
      to_file='%s/keras_autoencoder1.png' % (data_dir,),
      show_shapes=True)
+plot(autoencoder1,
+     to_file='%s/keras_autoencoder1.eps' % (data_dir,),
+     show_shapes=True)
 
 # Train first autoencoder on raw input.
 autoencoder1.fit(x_train, x_train,
@@ -159,8 +162,8 @@ autoencoder1.fit(x_train, x_train,
 # Stack the 2nd autoencoder (connecting to encode1):
 encode2_layer = Dense(hidden2,
                       activation='sigmoid',
-                      activity_regularizer=activity_l1(0.00005),
-                      W_regularizer=l2(0.0002),
+                      activity_regularizer=activity_l1(0.00003),
+                      W_regularizer=l2(0.0003),
                       name="encode2")
 encode2_tensor = encode2_layer(encode1_tensor)
 
@@ -178,6 +181,9 @@ decode1_layer.trainable = False
 autoencoder2.compile(optimizer='adadelta', loss='mse')
 plot(autoencoder2,
      to_file='%s/keras_autoencoder2.png' % (data_dir,),
+     show_shapes=True)
+plot(autoencoder2,
+     to_file='%s/keras_autoencoder2.eps' % (data_dir,),
      show_shapes=True)
 
 # Train second autoencoder.  We're basically training it on primary
