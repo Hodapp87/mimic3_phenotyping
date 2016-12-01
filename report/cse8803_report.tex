@@ -803,10 +803,9 @@ Hyperparameter optimization was likely the most time-consuming step of
 processing.  However, this step also is a highly parallelizable one,
 and so it was amenable to the distributed nature of Apache Spark.
 
-At Lasko's suggestion, the values (i.e. $y$) in each individual
-time-series were standardized to a mean of 0 and standard deviation of
-1, and this standardization was then reversed on the interpolated
-values.
+The values (i.e. $y$) in each individual time-series were standardized
+to a mean of 0 and standard deviation of 1, and this standardization
+was then reversed on the interpolated values.
 
 % TODO: Put algorithm 2.1 here perhaps rather than just citing it.
 
@@ -822,9 +821,8 @@ they use the notation $\mathbf{x^*}$ for ``test input'').
 As in \cite{Lasko2013}, all of these inferred functions were then
 evaluated at a regular sampling of time values (i.e. via the test
 input $\mathbf{x^*}$) with padding added before and after each time
-series.  For this data set, the sampling was done at intervals of 12
-hours, with 15 samples of padding (that is, 7.5 days) at the beginning
-and end of each time-series.
+series.  The sampling frequency and the amount of padding depends on
+the dataset, and so can be specified when running the tool.
 
 In effect, this mapped each individual time-series first to a
 continuous function, and then to a new ``interpolated'' time-series
@@ -847,11 +845,11 @@ as the backend.
 These autoencoders have a fixed-size input and output, and in order to
 accomodate this, fixed-size contiguous patches were sampled from the
 interpolated time-series.  As in \cite{Lasko2013}, the patch size was
-set to twice the padding (thus 30 samples here), and patches were
-sampled uniformly randomly from all contiguous patches.  A total of
-18,801 patches were produced here, all of which were then standardized
-to mean 0 and variance 1.  70\% of these patches were then selected
-for autoencoder training, and the remaining 30\% for validation.
+set to the total number of padded samples, and patches were sampled
+uniformly randomly from all contiguous patches.  A total of 18,801
+patches were produced here, all of which were then standardized to
+mean 0 and variance 1.  70\% of these patches were then selected for
+autoencoder training, and the remaining 30\% for validation.
 
 To accomodate this patch size, the autoencoder's input and output
 layers had 60 units (as each sample contained both variance and mean).
@@ -862,17 +860,26 @@ Manual experimentation led to L1 activity regularization
 (i.e. sparsity constraint) of $5\times10^{-5}$ and L2 weight
 regularization of $2\times10^{-4}$.
 
-In order to perform greedy layerwise training\cite{Ng}, the network
-was then built up in stages, starting first with this:
+\begin{figure}
+  \includegraphics[width=0.7\linewidth]{keras_autoencoder1.eps}
+  \caption{First stage of Keras autoencoder}
+  \label{fig:keras_autoencoder1}
+\end{figure}
 
-\includegraphics[width=0.7\linewidth]{keras_autoencoder1.png}
+\begin{figure}
+  \includegraphics[width=0.7\linewidth]{keras_autoencoder2.eps}
+  \caption{Keras network used for autoencoder}
+  \label{fig:keras_autoencoder2}
+\end{figure}
 
-This model was trained with the raw input data (at both the input and
-the output), thus learning ``primary'' hidden features at the layer
-\texttt{encode1}.  The first decoder layer \texttt{decode1} was then
-discarded and the model extended with another encoder and decoder:
-
-\includegraphics[width=0.7\linewidth]{keras_autoencoder2.png}
+This network was built up in stages in order to greedy layerwise
+train\cite{Ng}.  The first stage was the neural network in figure
+\ref{fig:keras_autoencoder1}; this was trained with the raw input data
+(at both the input and the output), thus learning ``primary'' hidden
+features at the layer \texttt{encode1}.  The first decoder layer
+\texttt{decode1} was then discarded and the model extended with
+another encoder and decoder, as in figure
+\ref{fig:keras_autoencoder2}.
 
 This model then was similarly trained on raw input data, but while
 keeping the weights in layer \texttt{encode1} constant.  That is, only
@@ -912,33 +919,43 @@ patients, and 187,374 time-stamped samples.  70\% of these admissions
 were randomly selected for the training set, and the remaining 30\%
 for the testing set.
 
-% TODO: Note gender, age, percent died?
+% TODO: Note padding amount & sampling frequency
+
+% TODO: Note gender, age, percent died?  How many of each ICD-9
+% category?
 
 An interesting detail which figure 2 of \cite{Lasko2013} shows is that
 the effects of the first layer (\texttt{encode1} here) can be
 visualized directly in the form of its weights.  As they form a 60x100
 array, each 60-element vector corresponds to a sort of time-series
-signature which that unit is detecting.  The below is one example
-(however, one that seems to suggest that the neural network still
-requires tuning, or that the input data is problematic):
+signature which that unit is detecting.  Figure
+\ref{fig:keras_hidden1} shows one such result from training the
+network on the subset of the data described here.
 
-\includegraphics[width=\linewidth]{keras_1st_layer.png}
+\begin{figure}
+  \includegraphics[width=\linewidth]{cohort_518_584_11558-4_keras_layer1.eps}
+  \caption{Autoencoder first-layer weights, shown as 100 time-series}
+  \label{fig:keras_hidden1}
+\end{figure}
+
+This shows similar structure as in \cite{Lasko2013} (including
+considerable redundancy), but with different sorts of signatures.
+Particularly, it seems to single out edges and certain kinds of ramps.
 
 Presently, not many other results are available as further work is
 needed.  The resultant features from the autoencoder still need to be
 examined alongside their labels, and some further clustering and
 visualization done on this.
-% TODO (time permitting):
-% - Visualization of weights
 
 \section{Conclusions \& Further Work}
 
-This work is still in need of further experimentation and refining.
-The code is intended to be released as an open-source tool that allows
-exploration in MIMIC-III data but could easily be generalized to other
-time-series data, however, the code is not yet released.
+This work is still in need of further experimentation and refining in
+order to produce meaningful results.  While the tool is meant to work
+generally over various subsets of data in MIMIC-III (and similar
+datasets with some modification), it may still require considerable
+tuning.
 
-Several optimizations also may help; for instance, hyperparameter
+Several optimizations also may help.  For instance, hyperparameter
 optimization is currently done with a grid search, but would more
 sensibly done with a more intelligent optimization algorithm (such as
 SGD).  The time warping function has parameters that could be tuned,
