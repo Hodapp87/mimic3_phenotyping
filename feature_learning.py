@@ -4,7 +4,6 @@
 
 import utils
 
-import os
 import pandas
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -33,21 +32,17 @@ except:
 #suffix = "276_427_50820"
 #suffix = "276_427_51268"
 data_dir = "./data/"
-#suffix = "cohort_518_584_11558-4"
-suffix = "cohort_428_584_1742-6"
+suffix = "cohort_518_584_11558-4"
+#suffix = "cohort_428_571_1742-6"
+#suffix = "cohort_428_584_1742-6"
 
+# Load interpolated time-series, and group together (they're in
+# flattened form in the CSV):
 df = pandas.read_csv(
     utils.get_single_csv("%s/%s_predict.csv" % (data_dir, suffix)))
 df.fillna("", inplace = True)
-df_groups = df.groupby((df["HADM_ID"], df["ITEMID"], df["VALUEUOM"]))
-
-gr = list(df_groups)
-print("Training: Got %d points (%d admissions)." % (len(df), len(gr)))
 
 # 'gr' then is a list of: ((HADM_ID, ITEMID, VALUEUOM), time-series dataframe)
-
-labels = pandas.read_csv(
-    utils.get_single_csv("%s/%s_categories.csv" % (data_dir, suffix)))
 
 # Standardize input to mean 0, variance 1 (to confuse matters a
 # little, the data that we're standardizing is itself mean and
@@ -63,10 +58,17 @@ var_std = df["VARIANCE"].std()
 if (var_std > 1e-20):
     df["VARIANCE"] = df["VARIANCE"] / var_std
 
-gr = list(df.groupby((df["HADM_ID"], df["ITEMID"], df["VALUEUOM"])))
+df_groups = df.groupby((df["HADM_ID"], df["ITEMID"], df["VALUEUOM"]))
+gr = list(df_groups)
 print("Got %d points (%d admissions)." % (len(df), len(gr)))
 
 # 'gr' then is a list of: ((HADM_ID, ITEMID, VALUEUOM), time-series dataframe)
+
+# Also load the labels; the CSV has (HADM_ID, ICD-9 category):
+labels_df = pandas.read_csv(
+    utils.get_single_csv("%s/%s_categories.csv" % (data_dir, suffix)))
+# Turn it to a dictionary with HADM_ID -> category:
+labels = dict(zip(labels_df["HADM_ID"], labels_df["ICD9_CATEGORY"]))
 
 #######################################################################
 # Gathering patches
@@ -96,15 +98,23 @@ x_data = numpy.zeros((patch_count, patch_length * 2))
 # Keras doesn't seem to actually allow multidimensional inputs in
 # 'Dense' despite saying that it does. Whatever.
 
+# x_labels has the respective labels for the rows in x_data:
+x_labels = []
+
 # Fill with (uniformly) random patches from the selected time-series:
-for (i,ts_idx) in enumerate(random_idx):
+for (i, ts_idx) in enumerate(random_idx):
+    # ts_idx is an index of a group (i.e. time-series) itself:
     ts = gr[ts_idx][1]
+    # Within this group we also need to pick the patch:
     start_idx = numpy.random.randint(num_patches[ts_idx])
     end_idx = start_idx + patch_length
     # First half is mean:
     x_data[i, :patch_length] = ts["MEAN"].iloc[start_idx:end_idx]
     # Second half is variance:
     x_data[i, patch_length:] = ts["VARIANCE"].iloc[start_idx:end_idx]
+    # and assign the respective label:
+    hadm, _, _ = gr[ts_idx][0]
+    x_labels.append(labels[hadm])
 
 print("Sampled %d patches of data" % (len(x_data),))
 
@@ -119,7 +129,8 @@ x_val, x_train = x_data[:split_idx,:], x_data[split_idx:,:]
 print("Split r=%g: %d patches for training, %d for validation" %
       (validation_ratio, len(x_val), len(x_train)))
 
-# TODO: Get labels
+# We don't split the labels because, intentionally, we never use them
+# for feature learning; it's unsupervised learning.
 
 #######################################################################
 # Stacked Autoencoder
@@ -230,21 +241,26 @@ plt.savefig("%s/%s_keras_layer1.png" % (data_dir, suffix), bbox_inches='tight')
 plt.close()
 
 #######################################################################
-# Disconnected scratch-pile
+# Disconnected scratch-pile that is seriously wrong in spots
 #######################################################################
 
 
 # TODO: Solve this better
 
-code1, code2 = labels["ICD9_CATEGORY"].unique()
-labels["color"] = numpy.where(labels["ICD9_CATEGORY"] == code1, "red",
-                              numpy.where(labels["ICD9_CATEGORY"] == code2,
-                                          "blue", "black"))
+code1, code2 = labels_df["ICD9_CATEGORY"].unique()
+def category_to_color(c):
+    if c == code1:
+        return "red"
+    elif c == code2:
+        return "blue"
+    else:
+        raise Exception("Unknown category: %s" % (c,))
+colors = [category_to_color(i) for i in x_labels]
 
 # Build model for 1st-layer features:
 encoder1 = Model(input=raw_input_tensor, output=encode1_tensor)
 
-features_raw1 = encoder1.predict(x_train)
+features_raw1 = encoder1.predict(x_data)
 ss = sklearn.preprocessing.StandardScaler()
 features1 = ss.fit_transform(features_raw1)
 
@@ -252,20 +268,20 @@ print("t-SNE on 1st-layer features...")
 tsne1 = sklearn.manifold.TSNE(random_state = 0)
 Y_tsne1 = tsne1.fit_transform(features1)
 
-plt.scatter(Y_tsne1[:,0], Y_tsne1[:, 1], color = labels["color"])
+plt.scatter(Y_tsne1[:,0], Y_tsne1[:, 1], color = colors, s=2)
 plt.savefig("%s/%s_tsne_layer1.eps" % (data_dir, suffix), bbox_inches='tight')
 plt.savefig("%s/%s_tsne_layer1.png" % (data_dir, suffix), bbox_inches='tight')
 plt.close()
 
 print("t-SNE on 2nd-layer features...")
-features_raw2 = stacked_encoder.predict(x_train)
+features_raw2 = stacked_encoder.predict(x_data)
 ss = sklearn.preprocessing.StandardScaler()
 features2 = ss.fit_transform(features_raw2)
 
 tsne2 = sklearn.manifold.TSNE(random_state = 0)
 Y_tsne2 = tsne2.fit_transform(features2)
 
-plt.scatter(Y_tsne2[:,0], Y_tsne2[:, 1], color = labels["color"])
+plt.scatter(Y_tsne2[:,0], Y_tsne2[:, 1], color = colors, s=2)
 plt.savefig("%s/%s_tsne_layer2.eps" % (data_dir, suffix), bbox_inches='tight')
 plt.savefig("%s/%s_tsne_layer2.png" % (data_dir, suffix), bbox_inches='tight')
 plt.close()
