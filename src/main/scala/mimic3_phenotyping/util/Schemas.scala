@@ -57,5 +57,13 @@ object Schemas {
     StructField("SHORT_TITLE",StringType,true),
     StructField("LONG_TITLE",StringType,true)
   ))
- 
+
+  val hyperparams = StructType(Array(
+    StructField("sigma2",DoubleType,true),
+    StructField("alpha",DoubleType,true),
+    StructField("tau",DoubleType,true),
+    StructField("log_likelihood",DoubleType,true),
+    StructField("LOINC_CODE",StringType,true)
+  ))
+  
 }
