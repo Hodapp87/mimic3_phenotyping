@@ -2,7 +2,6 @@ mimic3_phenotyping
 ==================
 
 - Background - Lasko's paper, my paper (arxiv?)
-- Don't mention CSE8803-O01
 
 Prerequisites
 ----
