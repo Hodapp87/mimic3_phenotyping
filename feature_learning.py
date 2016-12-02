@@ -185,7 +185,7 @@ if args.net_plot:
 
 # Train first autoencoder on raw input.
 autoencoder1.fit(x_train, x_train,
-                 nb_epoch=200,
+                 nb_epoch=500,
                  batch_size=256,
                  shuffle=True,
                  validation_data=(x_val, x_val))
@@ -223,7 +223,7 @@ if args.net_plot:
 # encoder's weights constant (hence 'trainable = False' above) and so
 # it is simply feeding encoded input in.
 autoencoder2.fit(x_train, x_train,
-                 nb_epoch=200,
+                 nb_epoch=500,
                  batch_size=256,
                  shuffle=True,
                  validation_data=(x_val, x_val)
@@ -241,7 +241,7 @@ if args.net_plot:
     print("Saving %s..." % (epsname,))
     plot(sae, to_file=epsname, show_shapes=True)
 sae.fit(x_train, x_train,
-        nb_epoch=200,
+        nb_epoch=500,
         batch_size=256,
         shuffle=True,
         validation_data=(x_val, x_val))
