@@ -38,16 +38,13 @@ parser.add_argument("-t", "--tsne",
                     action="store_true")
 parser.add_argument("-w", "--weight_l2",
                     help="Set L2 weight regularization (default 0.0003)",
-                    default=0.0003,
-                    action="store_true")
+                    default=0.0003)
 parser.add_argument("-a", "--activity_l1",
                     help="Set L1 activity regularization (default 0.00003)",
-                    default=0.00003,
-                    action="store_true")
+                    default=0.00003)
 parser.add_argument("-p", "--patch_length",
                     help="Set patch length for neural network training",
-                    default=20,
-                    action="store_true")
+                    default=20)
 
 args = parser.parse_args()
 print(args)
