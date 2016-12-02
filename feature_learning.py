@@ -13,6 +13,8 @@ import matplotlib.gridspec as gridspec
 import numpy
 import sklearn.manifold
 import sklearn.preprocessing
+import sklearn.linear_model # LogisticRegression
+import sklearn.metrics
 
 #######################################################################
 # Argument parsing
@@ -45,6 +47,9 @@ parser.add_argument("-a", "--activity_l1",
 parser.add_argument("-p", "--patch_length",
                     help="Set patch length for neural network training",
                     default=20)
+parser.add_argument("-r", "--logistic_regression",
+                    help="Train and run logistic regression classifier",
+                    action="store_true")
 
 args = parser.parse_args()
 
@@ -66,40 +71,46 @@ except:
 #######################################################################
 
 suffix = "cohort_%s_%s_%s" % (args.icd9a, args.icd9b, args.loinc)
+
+# Training data: load interpolated time-series, and group together
+# (they're in flattened form in the CSV):
 csvname = "%s/%s_predict.csv" % (args.data_dir, suffix)
 print("Trying to load: %s" % (csvname,))
-
-# Load interpolated time-series, and group together (they're in
-# flattened form in the CSV):
-df = pandas.read_csv(utils.get_single_csv(csvname))
-df.fillna("", inplace = True)
-
-# 'gr' then is a list of: ((HADM_ID, ITEMID, VALUEUOM), time-series dataframe)
+train = pandas.read_csv(utils.get_single_csv(csvname))
+train.fillna("", inplace = True)
 
 # Standardize input to mean 0, variance 1 (to confuse matters a
 # little, the data that we're standardizing is itself mean and
 # variance of the Gaussian process)
-df["MEAN"]     = df["MEAN"]     - df["MEAN"].mean()
-df["VARIANCE"] = df["VARIANCE"] - df["VARIANCE"].mean()
-# Checking for near-zero standard deviation is probably pointless
-# since the data will likely be useless, but I do it anyhow
-mean_std = df["MEAN"].std()
-if (mean_std > 1e-20):
-    df["MEAN"] = df["MEAN"] / mean_std
-var_std = df["VARIANCE"].std()
-if (var_std > 1e-20):
-    df["VARIANCE"] = df["VARIANCE"] / var_std
+train["MEAN"] = utils.standardize(train["MEAN"])
+train["VARIANCE"] = utils.standardize(train["VARIANCE"])
 
-df_groups = df.groupby((df["HADM_ID"], df["ITEMID"], df["VALUEUOM"]))
-gr = list(df_groups)
-print("Got %d points (%d admissions)." % (len(df), len(gr)))
+train_groups_ = train.groupby((train["HADM_ID"], train["ITEMID"], train["VALUEUOM"]))
+train_groups = list(train_groups_)
+print("Got %d train points (%d admissions)." % (len(train), len(train_groups)))
 
-# 'gr' then is a list of: ((HADM_ID, ITEMID, VALUEUOM), time-series dataframe)
-
-csvname = "%s/%s_predict.csv" % (args.data_dir, suffix)
+# Then do likewise for testing data:
+csvname = "%s/%s_predict_test.csv" % (args.data_dir, suffix)
 print("Trying to load: %s" % (csvname,))
+test = pandas.read_csv(utils.get_single_csv(csvname))
+test.fillna("", inplace = True)
+
+# Standardize input to mean 0, variance 1 (to confuse matters a
+# little, the data that we're standardizing is itself mean and
+# variance of the Gaussian process)
+test["MEAN"] = utils.standardize(test["MEAN"])
+test["VARIANCE"] = utils.standardize(test["VARIANCE"])
+
+test_groups_ = test.groupby((test["HADM_ID"], test["ITEMID"], test["VALUEUOM"]))
+test_groups = list(test_groups_)
+print("Got %d testing points (%d admissions)." % (len(training), len(test_groups)))
+
+# 'train_groups' and 'test_groups' then are lists of:
+# ((HADM_ID, ITEMID, VALUEUOM), time-series dataframe)
 
 # Also load the labels; the CSV has (HADM_ID, ICD-9 category):
+csvname = "%s/%s_categories.csv" % (args.data_dir, suffix)
+print("Trying to load: %s" % (csvname,))
 labels_df = pandas.read_csv(utils.get_single_csv(csvname))
 # Turn it to a dictionary with HADM_ID -> category:
 labels = dict(zip(labels_df["HADM_ID"], labels_df["ICD9_CATEGORY"]))
@@ -108,49 +119,21 @@ labels = dict(zip(labels_df["HADM_ID"], labels_df["ICD9_CATEGORY"]))
 # Gathering patches
 #######################################################################
 
-# Next, we need the actual number of contiguous patches in the
-# time-series, which depends on the desired patch length:
-patch_length = args.patch_length
+x_data, x_labels = utils.sample_patches(
+    train_groups, args.patch_length, 3, labels)
+print("Sampled %d patches of data (training)" % (len(x_data),))
 
-# So, assign a weight to each time-series based on how many patches
-# are in it (in effect, make each patch equally likely):
-num_patches = numpy.array([len(ts[1])-patch_length for ts in gr])
-weights = num_patches / float(num_patches.sum())
-
-# And then select 'patch_count' indices, each one for a particular
-# time-series:
-patch_count = len(gr) * 3
-random_idx = numpy.random.choice(len(gr), patch_count, p = weights)
-
-# Make an array to hold all this:
-x_data = numpy.zeros((patch_count, patch_length * 2))
-# Ordinarily I would put mean and variance in a 3rd dimension, but
-# Keras doesn't seem to actually allow multidimensional inputs in
-# 'Dense' despite saying that it does. Whatever.
-
-# x_labels has the respective labels for the rows in x_data:
-x_labels = []
-
-# Fill with (uniformly) random patches from the selected time-series:
-for (i, ts_idx) in enumerate(random_idx):
-    # ts_idx is an index of a group (i.e. time-series) itself:
-    ts = gr[ts_idx][1]
-    # Within this group we also need to pick the patch:
-    start_idx = numpy.random.randint(num_patches[ts_idx])
-    end_idx = start_idx + patch_length
-    # First half is mean:
-    x_data[i, :patch_length] = ts["MEAN"].iloc[start_idx:end_idx]
-    # Second half is variance:
-    x_data[i, patch_length:] = ts["VARIANCE"].iloc[start_idx:end_idx]
-    # and assign the respective label:
-    hadm, _, _ = gr[ts_idx][0]
-    x_labels.append(labels[hadm])
-
-print("Sampled %d patches of data" % (len(x_data),))
+x_data_test, x_labels_test = utils.sample_patches(
+    test_groups, args.patch_length, 3, labels)
+print("Sampled %d patches of data (testing)" % (len(x_data_test),))
 
 #######################################################################
 # Training/validation split
 #######################################################################
+# This is a bit confusing.  'Training' here refers just to the
+# training of the neural network, where we set aside part of the
+# training data for actual training and part for validation.
+
 # What ratio of the data to leave behind for validation
 validation_ratio = 0.2
 numpy.random.shuffle(x_data)
@@ -158,9 +141,6 @@ split_idx = int(patch_count * validation_ratio)
 x_val, x_train = x_data[:split_idx,:], x_data[split_idx:,:]
 print("Split r=%g: %d patches for training, %d for validation" %
       (validation_ratio, len(x_val), len(x_train)))
-
-# We don't split the labels because, intentionally, we never use them
-# for feature learning; it's unsupervised learning.
 
 #######################################################################
 # Stacked Autoencoder
@@ -282,12 +262,31 @@ print("Saving %s..." % (epsname,))
 plt.savefig(epsname, bbox_inches='tight')
 plt.close()
 
+# Get 2nd-layer features:
+features_raw2 = stacked_encoder.predict(x_data)
+ss = sklearn.preprocessing.StandardScaler()
+features2 = ss.fit_transform(features_raw2)
+features_raw2_test = stacked_encoder.predict(x_data_test)
+features2_test = ss.transform(features_raw2_test)
+
+# Get 1st-layer features:
+encoder1 = Model(input=raw_input_tensor, output=encode1_tensor)
+features_raw1 = encoder1.predict(x_data)
+ss = sklearn.preprocessing.StandardScaler()
+features1 = ss.fit_transform(features_raw1)
+features_raw1_test = encoder1.predict(x_data_test)
+features1_test = ss.transform(features_raw1_test)
+
+# Prepare labels:
+code1, code2 = labels_df["ICD9_CATEGORY"].unique()
+x_labels_num = numpy.array([1 * (c == code1) for i in x_labels])
+x_labels_num_test = numpy.array([1 * (c == code1) for i in x_labels_test])
+
 #######################################################################
 # t-SNE
 #######################################################################
 
 if args.tsne:
-    code1, code2 = labels_df["ICD9_CATEGORY"].unique()
     def category_to_color(c):
         if c == code1:
             return "red"
@@ -296,13 +295,6 @@ if args.tsne:
         else:
             raise Exception("Unknown category: %s" % (c,))
     colors = [category_to_color(i) for i in x_labels]
-
-    # Build model for 1st-layer features:
-    encoder1 = Model(input=raw_input_tensor, output=encode1_tensor)
-
-    features_raw1 = encoder1.predict(x_data)
-    ss = sklearn.preprocessing.StandardScaler()
-    features1 = ss.fit_transform(features_raw1)
 
     print("t-SNE on 1st-layer features...")
     tsne1 = sklearn.manifold.TSNE(random_state = 0)
@@ -318,9 +310,6 @@ if args.tsne:
     plt.close()
 
     print("t-SNE on 2nd-layer features...")
-    features_raw2 = stacked_encoder.predict(x_data)
-    ss = sklearn.preprocessing.StandardScaler()
-    features2 = ss.fit_transform(features_raw2)
 
     tsne2 = sklearn.manifold.TSNE(random_state = 0)
     Y_tsne2 = tsne2.fit_transform(features2)
@@ -333,3 +322,45 @@ if args.tsne:
     print("Saving %s..." % (epsname,))
     plt.savefig(epsname, bbox_inches='tight')
     plt.close()
+
+#######################################################################
+# Logistic Regression
+#######################################################################
+
+#input: Y_pred,Y_true
+#output: accuracy, auc, precision, recall, f1-score
+def classification_metrics(Y_pred, Y_true):
+    #TODO: Calculate the above mentioned metrics
+    #NOTE: It is important to provide the output in the same order
+    return (sklearn.metrics.accuracy_score (Y_true, Y_pred),
+            sklearn.metrics.roc_auc_score  (Y_true, Y_pred),
+            sklearn.metrics.precision_score(Y_true, Y_pred),
+            sklearn.metrics.recall_score   (Y_true, Y_pred),
+            sklearn.metrics.f1_score       (Y_true, Y_pred))
+
+#input: Name of classifier, predicted labels, actual labels
+def display_metrics(Y_pred,Y_true):
+    print("______________________________________________")
+    acc, auc_, precision, recall, f1score = classification_metrics(Y_pred,Y_true)
+    print("Accuracy: "+str(acc))
+    print("AUC: "+str(auc_))
+    print("Precision: "+str(precision))
+    print("Recall: "+str(recall))
+    print("F1-score: "+str(f1score))
+    print("______________________________________________")
+    print("")
+
+if args.logistic_regression:
+    model = sklearn.linear_model.LogisticRegression()
+    # TODO: Comment this better
+    model.fit(features1, x_labels_num)
+    pred = model.predict(features1_test)
+    # x_data is already the *training* data, and we have labels.
+    display_metrics(pred, x_labels_test)
+
+    model = sklearn.linear_model.LogisticRegression()
+    # TODO: Comment this better
+    model.fit(features2, x_labels_num)
+    pred = model.predict(features2_test)
+    # x_data is already the *training* data, and we have labels.
+    display_metrics(pred, x_labels_test)
