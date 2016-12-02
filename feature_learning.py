@@ -42,7 +42,7 @@ parser.add_argument("-w", "--weight_l2",
                     action="store_true")
 parser.add_argument("-a", "--activity_l1",
                     help="Set L1 activity regularization (default 0.00003)",
-                    default=0.0003,
+                    default=0.00003,
                     action="store_true")
 parser.add_argument("-p", "--patch_length",
                     help="Set patch length for neural network training",
@@ -181,8 +181,8 @@ ts_shape = (patch_length * 2,)
 raw_input_tensor = Input(shape=ts_shape, name="raw_input")
 encode1_layer = Dense(hidden1,
                       activation='sigmoid',
-                      activity_regularizer=activity_l1(0.00003),
-                      W_regularizer=l2(0.0003),
+                      activity_regularizer=activity_l1(args.activity_l1),
+                      W_regularizer=l2(args.weight_l2),
                       name="encode1")
 encode1_tensor = encode1_layer(raw_input_tensor)
 
@@ -212,8 +212,8 @@ autoencoder1.fit(x_train, x_train,
 # Stack the 2nd autoencoder (connecting to encode1):
 encode2_layer = Dense(hidden2,
                       activation='sigmoid',
-                      activity_regularizer=activity_l1(0.00003),
-                      W_regularizer=l2(0.0003),
+                      activity_regularizer=activity_l1(args.activity_l1),
+                      W_regularizer=l2(args.weight_l2),
                       name="encode2")
 encode2_tensor = encode2_layer(encode1_tensor)
 
