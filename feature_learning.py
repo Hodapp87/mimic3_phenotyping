@@ -4,20 +4,60 @@
 
 import utils
 
+import argparse
 import pandas
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import numpy
 import math
 
+import sklearn.manifold
+import sklearn.preprocessing
+
+#######################################################################
+# Argument parsing
+#######################################################################
+
+parser = argparse.ArgumentParser(
+    description="Perform unsupervised feature learning on processed data")
+parser.add_argument("-d", "--data_dir", required=True,
+                    help="Input directory for data files from Spark")
+parser.add_argument("-o", "--output_dir", required=True,
+                    help="Output directory for plots and models")
+parser.add_argument("--icd9a", required=True,
+                    help="First ICD9 code (for locating saved data)")
+parser.add_argument("--icd9b", required=True,
+                    help="Second ICD9 code (for locating saved data)")
+parser.add_argument("-l", "--loinc", required=True,
+                    help="LOINC code (for locating saved data)")
+parser.add_argument("-n", "--net_plot",
+                    help="Plot neural network structure (requires pydot-ng)",
+                    action="store_true")
+parser.add_argument("-t", "--tsne",
+                    help="Perform t-SNE on learned features and produce plots",
+                    action="store_true")
+parser.add_argument("-w", "--weight_l2",
+                    help="Set L2 weight regularization (default 0.0003)",
+                    default=0.0003,
+                    action="store_true")
+parser.add_argument("-a", "--activity_l1",
+                    help="Set L1 activity regularization (default 0.00003)",
+                    default=0.0003,
+                    action="store_true")
+parser.add_argument("-p", "--patch_length",
+                    help="Set patch length for neural network training",
+                    default=20,
+                    action="store_true")
+
+args = parser.parse_args()
+print(args)
+
+# These can be slower, so do them after argument parsing:
 from keras.layers import Input, Dense, Lambda
 from keras.models import Model
 from keras.regularizers import activity_l1, l2, activity_l2
 from keras import backend as K
 from keras import objectives
-
-import sklearn.manifold
-import sklearn.preprocessing
 
 # Make sure pydot-ng is installed for the below
 try:
@@ -29,17 +69,13 @@ except:
 # Loading data
 #######################################################################
 
-#suffix = "276_427_50820"
-#suffix = "276_427_51268"
-data_dir = "./data/"
-suffix = "cohort_518_584_11558-4"
-#suffix = "cohort_428_571_1742-6"
-#suffix = "cohort_428_584_1742-6"
+suffix = "cohort_%s_%s_%s" % (args.icd9a, args.icd9b, args.loinc)
+csvname = "%s/%s_predict.csv" % (args.data_dir, suffix)
+print("Trying to load: %s" % (csvname,))
 
 # Load interpolated time-series, and group together (they're in
 # flattened form in the CSV):
-df = pandas.read_csv(
-    utils.get_single_csv("%s/%s_predict.csv" % (data_dir, suffix)))
+df = pandas.read_csv(utils.get_single_csv(csvname))
 df.fillna("", inplace = True)
 
 # 'gr' then is a list of: ((HADM_ID, ITEMID, VALUEUOM), time-series dataframe)
@@ -64,9 +100,11 @@ print("Got %d points (%d admissions)." % (len(df), len(gr)))
 
 # 'gr' then is a list of: ((HADM_ID, ITEMID, VALUEUOM), time-series dataframe)
 
+csvname = "%s/%s_predict.csv" % (args.data_dir, suffix)
+print("Trying to load: %s" % (csvname,))
+
 # Also load the labels; the CSV has (HADM_ID, ICD-9 category):
-labels_df = pandas.read_csv(
-    utils.get_single_csv("%s/%s_categories.csv" % (data_dir, suffix)))
+labels_df = pandas.read_csv(utils.get_single_csv(csvname))
 # Turn it to a dictionary with HADM_ID -> category:
 labels = dict(zip(labels_df["HADM_ID"], labels_df["ICD9_CATEGORY"]))
 
@@ -75,12 +113,8 @@ labels = dict(zip(labels_df["HADM_ID"], labels_df["ICD9_CATEGORY"]))
 #######################################################################
 
 # Next, we need the actual number of contiguous patches in the
-# time-series.  The length of these contiguous patches is set to twice
-# the padding before and after in order to ensure every series can
-# supply a patch.
-padding = 2.5
-interval = 0.25
-patch_length = int(math.ceil(2 * padding / interval))
+# time-series, which depends on the desired patch length:
+patch_length = args.patch_length
 
 # So, assign a weight to each time-series based on how many patches
 # are in it (in effect, make each patch equally likely):
@@ -160,12 +194,13 @@ decode1_tensor = decode1_layer(encode1_tensor)
 # First model is input -> encode1 -> decode1:
 autoencoder1 = Model(input=raw_input_tensor, output=decode1_tensor)
 autoencoder1.compile(optimizer='adadelta', loss='mse')
-plot(autoencoder1,
-     to_file='%s/keras_autoencoder1.png' % (data_dir,),
-     show_shapes=True)
-plot(autoencoder1,
-     to_file='%s/keras_autoencoder1.eps' % (data_dir,),
-     show_shapes=True)
+if args.net_plot:
+    pngname = '%s/keras_autoencoder1.png' % (args.output_dir,)
+    epsname = '%s/keras_autoencoder1.eps' % (args.output_dir,)
+    print("Saving %s..." % (pngname,))
+    plot(autoencoder1, to_file=pngname, show_shapes=True)
+    print("Saving %s..." % (epsname,))
+    plot(autoencoder1, to_file=epsname, show_shapes=True)
 
 # Train first autoencoder on raw input.
 autoencoder1.fit(x_train, x_train,
@@ -194,12 +229,13 @@ encode1_layer.trainable = False
 # Probably superfluous:
 decode1_layer.trainable = False
 autoencoder2.compile(optimizer='adadelta', loss='mse')
-plot(autoencoder2,
-     to_file='%s/keras_autoencoder2.png' % (data_dir,),
-     show_shapes=True)
-plot(autoencoder2,
-     to_file='%s/keras_autoencoder2.eps' % (data_dir,),
-     show_shapes=True)
+if args.net_plot:
+    pngname = '%s/keras_autoencoder2.png' % (args.output_dir,)
+    epsname = '%s/keras_autoencoder2.eps' % (args.output_dir,)
+    print("Saving %s..." % (pngname,))
+    plot(autoencoder2, to_file=pngname, show_shapes=True)
+    print("Saving %s..." % (epsname,))
+    plot(autoencoder2, to_file=epsname, show_shapes=True)
 
 # Train second autoencoder.  We're basically training it on primary
 # hidden features, not raw input, because we're keeping the first
@@ -216,9 +252,13 @@ autoencoder2.fit(x_train, x_train,
 encode1_layer.trainable = True
 sae = Model(input=raw_input_tensor, output=decode2_tensor)
 sae.compile(optimizer='adadelta', loss='mse')
-plot(sae,
-     to_file='%s/keras_sae.png' % (data_dir,),
-     show_shapes=True)
+if args.net_plot:
+    pngname = '%s/keras_sae.png' % (args.output_dir,)
+    epsname = '%s/keras_sae.eps' % (args.output_dir,)
+    print("Saving %s..." % (pngname,))
+    plot(sae, to_file=pngname, show_shapes=True)
+    print("Saving %s..." % (epsname,))
+    plot(sae, to_file=epsname, show_shapes=True)
 sae.fit(x_train, x_train,
         nb_epoch=200,
         batch_size=256,
@@ -227,61 +267,73 @@ sae.fit(x_train, x_train,
 
 # Then, here is our model which provides 2nd hidden layer features:
 stacked_encoder = Model(input=raw_input_tensor, output=encode2_tensor)
-plot(stacked_encoder,
-     to_file='%s/keras_stacked_encoder.png' % (data_dir,),
-     show_shapes=True)
+if args.net_plot:
+    pngname = '%s/keras_stacked_encoder.png' % (args.output_dir,)
+    epsname = '%s/keras_stacked_encoder.eps' % (args.output_dir,)
+    print("Saving %s..." % (pngname,))
+    plot(stacked_encoder, to_file=pngname, show_shapes=True)
+    print("Saving %s..." % (epsname,))
+    plot(stacked_encoder, to_file=epsname, show_shapes=True)
 
 print("Plotting 1st-layer weights...")
 # Get means from 1st-layer weights:
-utils.plot_weights(encode1_layer.get_weights()[0][:30,:],
-                   None)
-                   #encode1_layer.get_weights()[0][30:,:])
-plt.savefig("%s/%s_keras_layer1.eps" % (data_dir, suffix), bbox_inches='tight')
-plt.savefig("%s/%s_keras_layer1.png" % (data_dir, suffix), bbox_inches='tight')
+utils.plot_weights(encode1_layer.get_weights()[0][:30,:], None)
+epsname = "%s/%s_keras_layer1.eps" % (args.output_dir, suffix)
+pngname = "%s/%s_keras_layer1.png" % (args.output_dir, suffix)
+print("Saving %s..." % (pngname,))
+plt.savefig(pngname, bbox_inches='tight')
+print("Saving %s..." % (epsname,))
+plt.savefig(epsname, bbox_inches='tight')
 plt.close()
 
 #######################################################################
-# Disconnected scratch-pile that is seriously wrong in spots
+# t-SNE
 #######################################################################
 
+if args.tsne:
+    code1, code2 = labels_df["ICD9_CATEGORY"].unique()
+    def category_to_color(c):
+        if c == code1:
+            return "red"
+        elif c == code2:
+            return "blue"
+        else:
+            raise Exception("Unknown category: %s" % (c,))
+    colors = [category_to_color(i) for i in x_labels]
 
-# TODO: Solve this better
+    # Build model for 1st-layer features:
+    encoder1 = Model(input=raw_input_tensor, output=encode1_tensor)
 
-code1, code2 = labels_df["ICD9_CATEGORY"].unique()
-def category_to_color(c):
-    if c == code1:
-        return "red"
-    elif c == code2:
-        return "blue"
-    else:
-        raise Exception("Unknown category: %s" % (c,))
-colors = [category_to_color(i) for i in x_labels]
+    features_raw1 = encoder1.predict(x_data)
+    ss = sklearn.preprocessing.StandardScaler()
+    features1 = ss.fit_transform(features_raw1)
 
-# Build model for 1st-layer features:
-encoder1 = Model(input=raw_input_tensor, output=encode1_tensor)
+    print("t-SNE on 1st-layer features...")
+    tsne1 = sklearn.manifold.TSNE(random_state = 0)
+    Y_tsne1 = tsne1.fit_transform(features1)
 
-features_raw1 = encoder1.predict(x_data)
-ss = sklearn.preprocessing.StandardScaler()
-features1 = ss.fit_transform(features_raw1)
+    plt.scatter(Y_tsne1[:,0], Y_tsne1[:, 1], color = colors, s=2)
+    epsname = "%s/%s_tsne_layer1.eps" % (args.output_dir, suffix)
+    pngname = "%s/%s_tsne_layer1.png" % (args.output_dir, suffix)
+    print("Saving %s..." % (pngname,))
+    plt.savefig(pngname, bbox_inches='tight')
+    print("Saving %s..." % (epsname,))
+    plt.savefig(epsname, bbox_inches='tight')
+    plt.close()
 
-print("t-SNE on 1st-layer features...")
-tsne1 = sklearn.manifold.TSNE(random_state = 0)
-Y_tsne1 = tsne1.fit_transform(features1)
+    print("t-SNE on 2nd-layer features...")
+    features_raw2 = stacked_encoder.predict(x_data)
+    ss = sklearn.preprocessing.StandardScaler()
+    features2 = ss.fit_transform(features_raw2)
 
-plt.scatter(Y_tsne1[:,0], Y_tsne1[:, 1], color = colors, s=2)
-plt.savefig("%s/%s_tsne_layer1.eps" % (data_dir, suffix), bbox_inches='tight')
-plt.savefig("%s/%s_tsne_layer1.png" % (data_dir, suffix), bbox_inches='tight')
-plt.close()
+    tsne2 = sklearn.manifold.TSNE(random_state = 0)
+    Y_tsne2 = tsne2.fit_transform(features2)
 
-print("t-SNE on 2nd-layer features...")
-features_raw2 = stacked_encoder.predict(x_data)
-ss = sklearn.preprocessing.StandardScaler()
-features2 = ss.fit_transform(features_raw2)
-
-tsne2 = sklearn.manifold.TSNE(random_state = 0)
-Y_tsne2 = tsne2.fit_transform(features2)
-
-plt.scatter(Y_tsne2[:,0], Y_tsne2[:, 1], color = colors, s=2)
-plt.savefig("%s/%s_tsne_layer2.eps" % (data_dir, suffix), bbox_inches='tight')
-plt.savefig("%s/%s_tsne_layer2.png" % (data_dir, suffix), bbox_inches='tight')
-plt.close()
+    plt.scatter(Y_tsne2[:,0], Y_tsne2[:, 1], color = colors, s=2)
+    epsname = "%s/%s_tsne_layer2.eps" % (args.output_dir, suffix)
+    pngname = "%s/%s_tsne_layer2.png" % (args.output_dir, suffix)
+    print("Saving %s..." % (pngname,))
+    plt.savefig(pngname, bbox_inches='tight')
+    print("Saving %s..." % (epsname,))
+    plt.savefig(epsname, bbox_inches='tight')
+    plt.close()
