@@ -300,20 +300,22 @@ print("Saving %s..." % (epsname,))
 plt.savefig(epsname, bbox_inches='tight')
 plt.close()
 
-# Get 2nd-layer features:
-features_raw2 = stacked_encoder.predict(x_data)
-ss = sklearn.preprocessing.StandardScaler()
-features2 = ss.fit_transform(features_raw2)
-features_raw2_test = stacked_encoder.predict(x_data_test)
-features2_test = ss.transform(features_raw2_test)
-
 # Get 1st-layer features:
 encoder1 = Model(input=raw_input_tensor, output=encode1_tensor)
 features_raw1 = encoder1.predict(x_data)
+features_raw1_test = encoder1.predict(x_data_test)
+# Standardize training, and apply same transform to test:
 ss = sklearn.preprocessing.StandardScaler()
 features1 = ss.fit_transform(features_raw1)
-features_raw1_test = encoder1.predict(x_data_test)
 features1_test = ss.transform(features_raw1_test)
+
+# Get 2nd-layer features:
+features_raw2 = stacked_encoder.predict(x_data)
+features_raw2_test = stacked_encoder.predict(x_data_test)
+ss = sklearn.preprocessing.StandardScaler()
+# Likewise, standardize training, and apply same transform to test:
+features2 = ss.fit_transform(features_raw2)
+features2_test = ss.transform(features_raw2_test)
 
 # Prepare labels:
 code1, code2 = labels_df["ICD9_CATEGORY"].unique()
@@ -335,10 +337,12 @@ if args.tsne:
     colors = [category_to_color(i) for i in x_labels]
 
     print("t-SNE on 1st-layer features...")
-    tsne1 = sklearn.manifold.TSNE(random_state = 0)
+    tsne1 = sklearn.manifold.TSNE(perplexity = 20)
     Y_tsne1 = tsne1.fit_transform(features1)
 
-    plt.scatter(Y_tsne1[:,0], Y_tsne1[:, 1], color = colors, s=2)
+    s1 = plt.scatter(Y_tsne1[x_labels == code1, 0], Y_tsne1[x_labels == code1, 1], color = "red", s=2)
+    s2 = plt.scatter(Y_tsne1[x_labels == code2, 0], Y_tsne1[x_labels == code2, 1], color = "blue", s=2)
+    plt.legend((s1, s2), (str(code1), str(code2)))
     epsname = "%s/%s_tsne_layer1.eps" % (args.output_dir, suffix)
     pngname = "%s/%s_tsne_layer1.png" % (args.output_dir, suffix)
     print("Saving %s..." % (pngname,))
@@ -349,10 +353,12 @@ if args.tsne:
 
     print("t-SNE on 2nd-layer features...")
 
-    tsne2 = sklearn.manifold.TSNE(random_state = 0)
+    tsne2 = sklearn.manifold.TSNE(perplexity = 20)
     Y_tsne2 = tsne2.fit_transform(features2)
 
-    plt.scatter(Y_tsne2[:,0], Y_tsne2[:, 1], color = colors, s=2)
+    s1 = plt.scatter(Y_tsne2[x_labels == code1, 0], Y_tsne1[x_labels == code1, 1], color = "red", s=2)
+    s2 = plt.scatter(Y_tsne2[x_labels == code2, 0], Y_tsne1[x_labels == code2, 1], color = "blue", s=2)
+    plt.legend((s1, s2), (str(code1), str(code2)))
     epsname = "%s/%s_tsne_layer2.eps" % (args.output_dir, suffix)
     pngname = "%s/%s_tsne_layer2.png" % (args.output_dir, suffix)
     print("Saving %s..." % (pngname,))
@@ -365,18 +371,13 @@ if args.tsne:
 # Logistic Regression
 #######################################################################
 
-#input: Y_pred,Y_true
-#output: accuracy, auc, precision, recall, f1-score
 def classification_metrics(Y_pred, Y_true):
-    #TODO: Calculate the above mentioned metrics
-    #NOTE: It is important to provide the output in the same order
     return (sklearn.metrics.accuracy_score (Y_true, Y_pred),
             sklearn.metrics.roc_auc_score  (Y_true, Y_pred),
             sklearn.metrics.precision_score(Y_true, Y_pred),
             sklearn.metrics.recall_score   (Y_true, Y_pred),
             sklearn.metrics.f1_score       (Y_true, Y_pred))
 
-#input: Name of classifier, predicted labels, actual labels
 def display_metrics(Y_pred,Y_true):
     print("______________________________________________")
     acc, auc_, precision, recall, f1score = classification_metrics(Y_pred,Y_true)
@@ -389,11 +390,9 @@ def display_metrics(Y_pred,Y_true):
     print("")
 
 if args.logistic_regression:
-    # TODO: Comment this better
     model = sklearn.linear_model.LogisticRegression()
     model.fit(features1, x_labels_num)
     pred = model.predict(features1_test)
-    # x_data is already the *training* data, and we have labels.
     display_metrics(pred, x_labels_num_test)
 
     model = sklearn.linear_model.LogisticRegression()
