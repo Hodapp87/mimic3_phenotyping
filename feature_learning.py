@@ -356,16 +356,14 @@ def display_metrics(Y_pred,Y_true):
     print("")
 
 if args.logistic_regression:
-    model = sklearn.linear_model.LogisticRegression()
     # TODO: Comment this better
+    model = sklearn.linear_model.LogisticRegression()
     model.fit(features1, x_labels_num)
     pred = model.predict(features1_test)
     # x_data is already the *training* data, and we have labels.
-    display_metrics(pred, x_labels_test)
+    display_metrics(pred, x_labels_num_test)
 
     model = sklearn.linear_model.LogisticRegression()
-    # TODO: Comment this better
     model.fit(features2, x_labels_num)
     pred = model.predict(features2_test)
-    # x_data is already the *training* data, and we have labels.
-    display_metrics(pred, x_labels_test)
+    display_metrics(pred, x_labels_num_test)
