@@ -103,7 +103,7 @@ test["VARIANCE"] = utils.standardize(test["VARIANCE"])
 
 test_groups_ = test.groupby((test["HADM_ID"], test["ITEMID"], test["VALUEUOM"]))
 test_groups = list(test_groups_)
-print("Got %d testing points (%d admissions)." % (len(training), len(test_groups)))
+print("Got %d testing points (%d admissions)." % (len(test), len(test_groups)))
 
 # 'train_groups' and 'test_groups' then are lists of:
 # ((HADM_ID, ITEMID, VALUEUOM), time-series dataframe)
@@ -137,7 +137,7 @@ print("Sampled %d patches of data (testing)" % (len(x_data_test),))
 # What ratio of the data to leave behind for validation
 validation_ratio = 0.2
 numpy.random.shuffle(x_data)
-split_idx = int(patch_count * validation_ratio)
+split_idx = int(args.patch_length * validation_ratio)
 x_val, x_train = x_data[:split_idx,:], x_data[split_idx:,:]
 print("Split r=%g: %d patches for training, %d for validation" %
       (validation_ratio, len(x_val), len(x_train)))
@@ -152,7 +152,7 @@ hidden2 = 100
 
 # Input is size of one patch, with another dimension of size 2 (for
 # mean & variance)
-ts_shape = (patch_length * 2,)
+ts_shape = (args.patch_length * 2,)
 
 raw_input_tensor = Input(shape=ts_shape, name="raw_input")
 encode1_layer = Dense(hidden1,
@@ -162,7 +162,7 @@ encode1_layer = Dense(hidden1,
                       name="encode1")
 encode1_tensor = encode1_layer(raw_input_tensor)
 
-decode1_layer = Dense(output_dim=patch_length * 2,
+decode1_layer = Dense(output_dim=args.patch_length * 2,
                       activation='linear',
                       name="decode1")
 decode1_tensor = decode1_layer(encode1_tensor)
@@ -193,7 +193,7 @@ encode2_layer = Dense(hidden2,
                       name="encode2")
 encode2_tensor = encode2_layer(encode1_tensor)
 
-decode2_layer = Dense(output_dim=patch_length * 2,
+decode2_layer = Dense(output_dim=args.patch_length * 2,
                       activation='linear',
                       name="decode2")
 decode2_tensor = decode2_layer(encode2_tensor)

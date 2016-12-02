@@ -63,7 +63,7 @@ def sample_patches(groups, patch_multiple, patch_length, labelsDict):
     # Fill with (uniformly) random patches from the selected time-series:
     for (i, ts_idx) in enumerate(random_idx):
         # ts_idx is an index of a group (i.e. time-series) itself:
-        ts = gr[ts_idx][1]
+        ts = groups[ts_idx][1]
         # Within this group we also need to pick the patch:
         start_idx = numpy.random.randint(num_patches[ts_idx])
         end_idx = start_idx + patch_length
