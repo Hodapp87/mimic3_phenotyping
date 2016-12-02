@@ -38,14 +38,20 @@ parser.add_argument("-n", "--net_plot",
 parser.add_argument("-t", "--tsne",
                     help="Perform t-SNE on learned features and produce plots",
                     action="store_true")
+parser.add_argument("-m", "--load_model",
+                    help="Load trained weights from given HDF5 (.h5) file rather than training",
+                    default="")
+parser.add_argument("-s", "--save_model",
+                    help="Save trained weights as an HDF5 (.h5) file",
+                    default="")
 parser.add_argument("-w", "--weight_l2",
-                    help="Set L2 weight regularization (default 0.0003)",
+                    help="Set L2 weight regularization (default 0.0003); ignored for -m",
                     default=0.0003)
 parser.add_argument("-a", "--activity_l1",
-                    help="Set L1 activity regularization (default 0.00003)",
+                    help="Set L1 activity regularization (default 0.00003); ignored for -m",
                     default=0.00003)
 parser.add_argument("-p", "--patch_length",
-                    help="Set patch length for neural network training",
+                    help="Set patch length for neural network training and testing",
                     default=20)
 parser.add_argument("-r", "--logistic_regression",
                     help="Train and run logistic regression classifier",
@@ -115,6 +121,16 @@ labels_df = pandas.read_csv(utils.get_single_csv(csvname))
 # Turn it to a dictionary with HADM_ID -> category:
 labels = dict(zip(labels_df["HADM_ID"], labels_df["ICD9_CATEGORY"]))
 
+labels_hist = {}
+for (hadm_id,_,_),_ in train_groups:
+    label = labels[hadm_id]
+    if label not in labels_hist:
+        labels_hist[label] = 0
+    labels_hist[label] += 1
+
+print("Counts in training data:")
+print(labels_hist)
+
 #######################################################################
 # Gathering patches
 #######################################################################
@@ -151,6 +167,9 @@ print("Split r=%g: %d patches for training, %d for validation" %
 # Stacked Autoencoder
 #######################################################################
 
+# Should we train this net? (versus loading from file)
+train_net = args.load_model == ""
+
 # Size of hidden layers:
 hidden1 = 100
 hidden2 = 100
@@ -183,12 +202,13 @@ if args.net_plot:
     print("Saving %s..." % (epsname,))
     plot(autoencoder1, to_file=epsname, show_shapes=True)
 
-# Train first autoencoder on raw input.
-autoencoder1.fit(x_train, x_train,
-                 nb_epoch=500,
-                 batch_size=256,
-                 shuffle=True,
-                 validation_data=(x_val, x_val))
+if train_net:
+    # Train first autoencoder on raw input.
+    autoencoder1.fit(x_train, x_train,
+                     nb_epoch=500,
+                     batch_size=256,
+                     shuffle=True,
+                     validation_data=(x_val, x_val))
 
 # Stack the 2nd autoencoder (connecting to encode1):
 encode2_layer = Dense(hidden2,
@@ -218,16 +238,17 @@ if args.net_plot:
     print("Saving %s..." % (epsname,))
     plot(autoencoder2, to_file=epsname, show_shapes=True)
 
-# Train second autoencoder.  We're basically training it on primary
-# hidden features, not raw input, because we're keeping the first
-# encoder's weights constant (hence 'trainable = False' above) and so
-# it is simply feeding encoded input in.
-autoencoder2.fit(x_train, x_train,
-                 nb_epoch=500,
-                 batch_size=256,
-                 shuffle=True,
-                 validation_data=(x_val, x_val)
-                 )
+if train_net:
+    # Train second autoencoder.  We're basically training it on
+    # primary hidden features, not raw input, because we're keeping
+    # the first encoder's weights constant (hence 'trainable = False'
+    # above) and so it is simply feeding encoded input in.
+    autoencoder2.fit(x_train, x_train,
+                     nb_epoch=500,
+                     batch_size=256,
+                     shuffle=True,
+                     validation_data=(x_val, x_val)
+                     )
 
 # Finally, fine-tune stacked autoencoder on raw inputs:
 encode1_layer.trainable = True
@@ -240,11 +261,23 @@ if args.net_plot:
     plot(sae, to_file=pngname, show_shapes=True)
     print("Saving %s..." % (epsname,))
     plot(sae, to_file=epsname, show_shapes=True)
-sae.fit(x_train, x_train,
-        nb_epoch=500,
-        batch_size=256,
-        shuffle=True,
-        validation_data=(x_val, x_val))
+if train_net:
+    sae.fit(x_train, x_train,
+            nb_epoch=500,
+            batch_size=256,
+            shuffle=True,
+            validation_data=(x_val, x_val))
+
+# Load weights from a pre-trained model if requested:
+if args.load_model != "":
+    print("Loading weights from %s..." % (args.load_model,))
+    sae.load_weights(args.load_model)
+    # TODO: Check if this propagates to stacked_encoder properly
+
+# And save the model weights if requested:
+if args.save_model != "":
+    print("Saving weights to %s..." % (args.save_model,))
+    sae.save_weights(args.save_model)
 
 # Then, here is our model which provides 2nd hidden layer features:
 stacked_encoder = Model(input=raw_input_tensor, output=encode2_tensor)
