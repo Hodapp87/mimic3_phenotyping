@@ -356,8 +356,8 @@ if args.tsne:
     tsne2 = sklearn.manifold.TSNE(perplexity = 20)
     Y_tsne2 = tsne2.fit_transform(features2)
 
-    s1 = plt.scatter(Y_tsne2[x_labels == code1, 0], Y_tsne1[x_labels == code1, 1], color = "red", s=2)
-    s2 = plt.scatter(Y_tsne2[x_labels == code2, 0], Y_tsne1[x_labels == code2, 1], color = "blue", s=2)
+    s1 = plt.scatter(Y_tsne2[x_labels == code1, 0], Y_tsne2[x_labels == code1, 1], color = "red", s=2)
+    s2 = plt.scatter(Y_tsne2[x_labels == code2, 0], Y_tsne2[x_labels == code2, 1], color = "blue", s=2)
     plt.legend((s1, s2), (str(code1), str(code2)))
     epsname = "%s/%s_tsne_layer2.eps" % (args.output_dir, suffix)
     pngname = "%s/%s_tsne_layer2.png" % (args.output_dir, suffix)
