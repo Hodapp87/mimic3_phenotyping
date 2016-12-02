@@ -30,6 +30,8 @@ case class Config(
   icd9Code1 : String = "",
   icd9Code2 : String = "",
   loincTest : String = "",
+  paddingLength : Int = 20,
+  sampleInterval : Double = 0.25,
   suffix : String = ""
 )
 
@@ -81,6 +83,14 @@ object Main {
       opt[String]('l', "loinc").optional().action { (x,c) =>
         c.copy(loincTest = x)
       }.text("LOINC code to select which lab test to use")
+
+      opt[Int]('p', "padding_length").optional().action { (x,c) =>
+        c.copy(paddingLength = x)
+      }.text("Total padding to add at beginning and end of interpolated series (rounded down to even); default 10")
+
+      opt[Double]('s', "sample_interval").optional().action { (x,c) =>
+        c.copy(sampleInterval = x)
+      }.text("Time between interpolated samples in days (default 0.25)")
 
       checkConfig { c =>
         if (c.runGPR) {
@@ -198,8 +208,29 @@ object Main {
 
       val labs_cohort_train : RDD[PatientTimeSeries] = sc.
         objectFile(f"${config.outputPath}/${config.suffix}_train_rdd")
+      val labs_cohort_test : RDD[PatientTimeSeries] = sc.
+        objectFile(f"${config.outputPath}/${config.suffix}_test_rdd")
 
-      runGPR(spark, config, labs_cohort_train)
+      val training = runGPR(spark, config, labs_cohort_train)
+      val testing = runGPR(spark, config, labs_cohort_test)
+
+      val training_flat : DataFrame = Utils.
+        flattenPredictedTimeseries(spark, training)
+      training_flat.
+        write.
+        mode(SaveMode.Overwrite).
+        parquet(f"${config.outputPath}/${config.suffix}_predict.parquet")
+      Utils.csvOverwrite(training_flat).
+        save(f"${config.outputPath}/${config.suffix}_predict.csv")
+
+      val testing_flat : DataFrame = Utils.
+        flattenPredictedTimeseries(spark, training)
+      testing_flat.
+        write.
+        mode(SaveMode.Overwrite).
+        parquet(f"${config.outputPath}/${config.suffix}_predict_test.parquet")
+      Utils.csvOverwrite(testing_flat).
+        save(f"${config.outputPath}/${config.suffix}_predict_test.csv")
     }
 
   }
@@ -405,7 +436,7 @@ object Main {
   def optimizeHyperparams(spark : SparkSession, config : Config,
     labs_cohort : RDD[PatientTimeSeries]) : Unit =
   {
-    import spark.implicits._
+    //import spark.implicits._
     val sc = spark.sparkContext
     // Hyperparameter optimization:
     val sigma2Param = new DoubleParam("", "sigma2", "")
@@ -424,7 +455,7 @@ object Main {
 
     val paramGrid : Array[(Double, Double, Double)] = new ParamGridBuilder().
       addGrid(sigma2Param, 0.05 to 2.0 by 0.075).
-      addGrid(alphaParam, 0.05 to 2.00 by 0.075).
+      addGrid(alphaParam, 0.05 to 4.00 by 0.075).
       addGrid(tauParam, 0.2 to 2.0 by 0.075).
       build.
       map { pm =>
@@ -488,7 +519,9 @@ object Main {
   }
   
   // Gaussian process regression
-  def runGPR(spark : SparkSession, config : Config, data : RDD[PatientTimeSeries]) : Unit = {
+  def runGPR(spark : SparkSession, config : Config,
+    data : RDD[PatientTimeSeries]) : RDD[PatientTimeSeriesPredicted] =
+  {
 
     // Get previously added hyperparameters:
     val hpDf : DataFrame = spark.
@@ -524,28 +557,21 @@ object Main {
     // respective Gaussian process model computed above).
 
     // How many days before & after do we interpolate for?
-    val padding = 2.5
+    val padding = config.paddingLength * config.sampleInterval / 2
     // What interval (in days) do we interpolate with?
-    val interval = 0.25
     // TODO: Make these commandline options too?
 
     // Create a new time-series with these predictions:
-    val tsInterpolated = gprModels.map { case (p, model) =>
-      val ts = p.warpedSeries.map(_._1)
-      val ts2 = (ts.min - padding) to (ts.max + padding) by interval
-      val predictions = Utils.gprPredict(ts2, ts, model)
-      PatientTimeSeriesPredicted(p.adm_id, p.item_id, p.subject_id, p.unit,
-        p.icd9category,
-        (ts2, predictions.map(_._1), predictions.map(_._2)).zipped.toList)
-    }
+    val tsInterpolated : RDD[PatientTimeSeriesPredicted] =
+      gprModels.map { case (p, model) =>
+        val ts = p.warpedSeries.map(_._1)
+        val ts2 = (ts.min - padding) to (ts.max + padding) by config.sampleInterval
+        val predictions = Utils.gprPredict(ts2, ts, model)
+        PatientTimeSeriesPredicted(p.adm_id, p.item_id, p.subject_id, p.unit,
+          p.icd9category,
+          (ts2, predictions.map(_._1), predictions.map(_._2)).zipped.toList)
+      }
 
-    val tsInterp_flat : DataFrame = Utils.
-      flattenPredictedTimeseries(spark, tsInterpolated)
-    tsInterp_flat.
-      write.
-      mode(SaveMode.Overwrite).
-      parquet(f"${config.outputPath}/${config.suffix}_predict.parquet")
-    Utils.csvOverwrite(tsInterp_flat).
-      save(f"${config.outputPath}/${config.suffix}_predict.csv")
+    tsInterpolated
   }
 }
