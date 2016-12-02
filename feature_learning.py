@@ -5,12 +5,12 @@
 import utils
 
 import argparse
+import math
+
 import pandas
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import numpy
-import math
-
 import sklearn.manifold
 import sklearn.preprocessing
 
@@ -47,7 +47,6 @@ parser.add_argument("-p", "--patch_length",
                     default=20)
 
 args = parser.parse_args()
-print(args)
 
 # These can be slower, so do them after argument parsing:
 from keras.layers import Input, Dense, Lambda

@@ -40,4 +40,23 @@ spark-submit --master "local[*]"
     -i "file:////mnt/dev/mimic3/"
     -o "file:///home/hodapp/source/bd4h-project-code/data/"
     -m -c -h --icd9a 518 --icd9b 584 -l "11558-4"
+
+python timeseries_plots.py -d ./data -o ./data --icd9a 428 --icd9b 571 --loinc 1742-6
+python feature_learning.py -d ./data -o ./data --icd9a 428 --icd9b 571 --loinc 1742-6 --activity_l1 0.00004 --weight_l2 0.0005
 ```
+
+Known Problems
+----
+
+- Hyperparameter optimization is neither fast nor accurate.  It should
+  be changed to gradient descent at some point, and the range in which
+  it searches should be expanded considerably.
+- A problem
+  like
+  [this](https://stackoverflow.com/questions/34329299/issuing-spark-submit-on-command-line-completes-tasks-but-never-returns-prompt) also occurs with hyperparameter optimization.
+- Parquet emits a lot of annoying messages that I don't know how to
+  silence.
+- A more sensible way probably exists to determine the padding and
+  sample frequency for the interpolation after Gaussian process
+  regression.  At a minimum, the code should supply some statistics
+  such as average warped time-series length.
