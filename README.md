@@ -1,7 +1,7 @@
 mimic3_phenotyping
 ==================
 
-- Background - Lasko's paper, my paper (arxiv?)
+Chris Hodapp, chodapp3@gatech.edu
 
 Requirements
 ----
@@ -23,28 +23,14 @@ Building
 everything.  `sbt package` should produce a JAR that `spark-submit`
 can handle.
 
-Running
-----
-
-- Amazon EMR or local?
-- Filenames contain ICD-9 codes and LOINC code if they are cohort-specific
-- Python code is run after
-
 Example run
 ----
 
-```
-spark-submit --master "local[*]" \
-    --repositories https://oss.sonatype.org/content/groups/public/ \
-    --packages "com.github.scopt:scopt_2.11:3.5.0" \
-    target/scala-2.11/mimic3_phenotyping_2.11-1.0.jar \
-    -i "file:////mnt/dev/mimic3/" \
-    -o "file:///home/hodapp/source/bd4h-project-code/data/" \
-    -m -c -h -r -b --icd9a 428 --icd9b 571 -l "1742-6"
-
-python timeseries_plots.py -d ./data -o ./data --icd9a 428 --icd9b 571 --loinc 1742-6
-python feature_learning.py -d ./data -o ./data --icd9a 428 --icd9b 571 --loinc 1742-6 --activity_l1 0.0001 --weight_l2 0.001 --tsne --logistic_regression
-```
+To produce what was in the paper, run the below commands from the same
+directory as the code.  For the first command, you will need to supply
+two paths: the path containing the `.csv.gz` files from MIMIC-III (for
+the `-i` option), and the full path to the `data` directory in this
+archive (for the `-o` option).
 
 ```
 spark-submit --master "local[*]" \
@@ -53,60 +39,20 @@ spark-submit --master "local[*]" \
     target/scala-2.11/mimic3_phenotyping_2.11-1.0.jar \
     -i "file:////mnt/dev/mimic3/" \
     -o "file:///home/hodapp/source/bd4h-project-code/data/" \
-    -m -c -h -r -b --icd9a 428 --icd9b 584 -l "1742-6"
+    -m -c -r -b --icd9a 428 --icd9b 584 -l "1742-6"
 
-python timeseries_plots.py -d ./data -o ./data --icd9a 428 --icd9b 584 --loinc 1742-6
-python feature_learning.py -d ./data -o ./data --icd9a 428 --icd9b 584 --loinc 1742-6 --activity_l1 0.0001 --weight_l2 0.001 --save_model 428_584_1742-6.h5 --tsne --logistic_regression
+python timeseries_plots.py -d ./data -o ./data \
+    --icd9a 428 --icd9b 584 --loinc 1742-6
+    
+python feature_learning.py -d ./data -o ./data \
+    --icd9a 428 --icd9b 584 --loinc 1742-6 \
+    --activity_l1 0.0001 --weight_l2 0.001 \
+    --load_model 428_584_1742-6.h5 --tsne --logistic_regression
 ```
 
-```
-spark-submit --master "local[*]" \
-    --repositories https://oss.sonatype.org/content/groups/public/ \
-    --packages "com.github.scopt:scopt_2.11:3.5.0" \
-    target/scala-2.11/mimic3_phenotyping_2.11-1.0.jar \
-    -i "file:////mnt/dev/mimic3/" \
-    -o "file:///home/hodapp/source/bd4h-project-code/data/" \
-    -m -c -h -r -b --icd9a 518 --icd9b 584 -l "11558-4"
-
-python timeseries_plots.py -d ./data -o ./data --icd9a 518 --icd9b 584 --loinc 11558-4
-python feature_learning.py -d ./data -o ./data --icd9a 518 --icd9b 584 --loinc 11558-4 --activity_l1 0.0001 --weight_l2 0.001 --tsne --logistic_regression
-```
-
-Known Problems & Needed Improvements
-----
-
-### General
-- The code really should be generalized to accomodate arbitrary
-  numbers of groups of ICD-9 codes rather than just two ICD-9
-  categories.
-
-### Spark code
-- Hyperparameter optimization is neither fast nor accurate.  It should
-  be changed to gradient descent at some point, and the range in which
-  it searches should be expanded considerably.
-- A problem
-  like
-  [this](https://stackoverflow.com/questions/34329299/issuing-spark-submit-on-command-line-completes-tasks-but-never-returns-prompt) occurs
-  sometimes, especially around hyperparameter optimization.  Check
-  Spark's web UI to see when jobs actually finish.  Thus far I've seen
-  this only with master `local[*]`, not with YARN on Amazon EMR.
-- Parquet emits a lot of annoying messages that I don't know how to
-  silence, and they get in the way of messages that matter.
-- A more sensible way probably exists to determine the padding and
-  sample frequency for the interpolation after Gaussian process
-  regression.  At a minimum, the code should supply some statistics
-  such as average warped time-series length.
-- I don't know of any good way to make Spark overwrite RDD files when
-  I use `saveAsObjectFile`.
-- Messages like this still occur; they might not be problematic but
-  should be looked at:
-```
-WARN netlib.LAPACK: Failed to load implementation from: com.github.fommil.netlib.NativeSystemLAPACK
-WARN netlib.LAPACK: Failed to load implementation from: com.github.fommil.netlib.NativeRefLAPACK
-WARN netlib.BLAS: Failed to load implementation from: com.github.fommil.netlib.NativeSystemBLAS
-WARN netlib.BLAS: Failed to load implementation from: com.github.fommil.netlib.NativeRefBLAS
-```
-
-### Python code
-- The code on occasion will segfault, and I have not yet been able to
-  reproduce it reliably enough to determine why.
+For expediency, this will skip hyperparameter optimization (which can
+take 20-30 minutes depending on machine) and use hyperparameters
+already estimated, and it will use weights from a pre-trained neural
+network instead of training it.  To actually run through the full
+process, add `-h` to the first command, and remove the `--load_model`
+option from the `feature_learning` invocation.
