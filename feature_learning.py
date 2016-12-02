@@ -120,11 +120,11 @@ labels = dict(zip(labels_df["HADM_ID"], labels_df["ICD9_CATEGORY"]))
 #######################################################################
 
 x_data, x_labels = utils.sample_patches(
-    train_groups, args.patch_length, 3, labels)
+    train_groups, 3, args.patch_length, labels)
 print("Sampled %d patches of data (training)" % (len(x_data),))
 
 x_data_test, x_labels_test = utils.sample_patches(
-    test_groups, args.patch_length, 3, labels)
+    test_groups, 3, args.patch_length, labels)
 print("Sampled %d patches of data (testing)" % (len(x_data_test),))
 
 #######################################################################
@@ -136,9 +136,14 @@ print("Sampled %d patches of data (testing)" % (len(x_data_test),))
 
 # What ratio of the data to leave behind for validation
 validation_ratio = 0.2
-numpy.random.shuffle(x_data)
-split_idx = int(args.patch_length * validation_ratio)
-x_val, x_train = x_data[:split_idx,:], x_data[split_idx:,:]
+
+# Produce [0, 1, 2...N-1], and shuffle these (rather than shuffling
+# x_data):
+idxs = numpy.arange(len(x_data))
+numpy.random.shuffle(idxs)
+split_idx = int(len(x_data) * validation_ratio)
+# and use shuffled indices to split training/validation:
+x_val, x_train = x_data[idxs[split_idx:],:], x_data[idxs[:split_idx],:]
 print("Split r=%g: %d patches for training, %d for validation" %
       (validation_ratio, len(x_val), len(x_train)))
 
@@ -279,8 +284,8 @@ features1_test = ss.transform(features_raw1_test)
 
 # Prepare labels:
 code1, code2 = labels_df["ICD9_CATEGORY"].unique()
-x_labels_num = numpy.array([1 * (c == code1) for i in x_labels])
-x_labels_num_test = numpy.array([1 * (c == code1) for i in x_labels_test])
+x_labels_num = numpy.array([1 * (c == code1) for c in x_labels])
+x_labels_num_test = numpy.array([1 * (c == code1) for c in x_labels_test])
 
 #######################################################################
 # t-SNE
