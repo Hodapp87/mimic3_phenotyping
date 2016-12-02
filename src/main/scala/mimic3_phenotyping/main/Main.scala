@@ -18,6 +18,7 @@ import scopt._
 
 import java.sql.Timestamp
 
+// Commandline options used to configure what actually is run:
 case class Config(
   mimicInput : String = "",
   outputPath : String = "",
@@ -29,6 +30,7 @@ case class Config(
   runGPR : Boolean = false,
   icd9Code1 : String = "",
   icd9Code2 : String = "",
+  balanceIcd9 : Boolean = false,
   loincTest : String = "",
   paddingLength : Int = 20,
   sampleInterval : Double = 0.25,
@@ -87,6 +89,10 @@ object Main {
       opt[Int]('p', "padding_length").optional().action { (x,c) =>
         c.copy(paddingLength = x)
       }.text("Total padding to add at beginning and end of interpolated series (rounded down to even); default 10")
+
+      opt[Unit]('b', "balance_icd9").optional().action { (x,c) =>
+        c.copy(balanceIcd9 = true)
+      }.text("Cohort selection should resample from admissions so that two ICD-9 categories occur in roughly equal counts")
 
       opt[Double]('s', "sample_interval").optional().action { (x,c) =>
         c.copy(sampleInterval = x)
@@ -358,7 +364,7 @@ object Main {
 
     // Produce time-series, and warped time-series, for all admissions
     // in the cohort (for just the selected lab items):
-    val labs_cohort : RDD[PatientTimeSeries] = labs_cohort_df.rdd.
+    val labs_cohort_raw : RDD[PatientTimeSeries] = labs_cohort_df.rdd.
       map { row =>
         val code1 = row.getAs[Long]("num_code1") > 0
         val code2 = row.getAs[Long]("num_code2") > 0
@@ -391,10 +397,36 @@ object Main {
             warpedTimes.zip(values)
           )
       }
-    // TODO: Get rid of groupByKey above and see if it helps
-    // performance.
+    // TODO: Remove groupByKey above and see if it helps performance.
     // I removed coalesce below, but haven't tested that yet.
-    // It seems
+
+    // If requested, remove admissions from one or the other in order
+    // to keep roughly the numbers of each ICD-9 category the same.
+    val labs_cohort = if (config.balanceIcd9) {
+      // TODO: The below can very likely be done more concisely and
+      // efficiently on a DataFrame in some fashion, or possibly other
+      // RDD operations.
+      val labs_cohort1 = labs_cohort_raw.
+        filter(_.icd9category == config.icd9Code1)
+      val labs_cohort2 = labs_cohort_raw.
+        filter(_.icd9category == config.icd9Code2)
+
+      val count1 = labs_cohort1.count.toDouble
+      val count2 = labs_cohort2.count.toDouble
+
+      // In either case, reduce the larger half and join with the
+      // smaller half:
+      if (count1 > count2) {
+        val labs_cohort1_reduced = labs_cohort1.sample(false, count2/count1)
+        labs_cohort1_reduced.union(labs_cohort2)
+      } else {
+        val labs_cohort2_reduced = labs_cohort1.sample(false, count1/count2)
+        labs_cohort2_reduced.union(labs_cohort1)
+      }
+    } else {
+      labs_cohort_raw
+    }
+
     labs_cohort.persist(StorageLevel.MEMORY_AND_DISK)
     labs_cohort.
       saveAsObjectFile(f"${config.outputPath}/${config.suffix}_labs_rdd")
