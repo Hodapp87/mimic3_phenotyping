@@ -43,7 +43,33 @@ spark-submit --master "local[*]" \
     -m -c -h -r -b --icd9a 428 --icd9b 571 -l "1742-6"
 
 python timeseries_plots.py -d ./data -o ./data --icd9a 428 --icd9b 571 --loinc 1742-6
-python feature_learning.py -d ./data -o ./data --icd9a 428 --icd9b 571 --loinc 1742-6 --activity_l1 0.00004 --weight_l2 0.0004 --tsne --logistic_regression
+python feature_learning.py -d ./data -o ./data --icd9a 428 --icd9b 571 --loinc 1742-6 --activity_l1 0.0001 --weight_l2 0.001 --tsne --logistic_regression
+```
+
+```
+spark-submit --master "local[*]" \
+    --repositories https://oss.sonatype.org/content/groups/public/ \
+    --packages "com.github.scopt:scopt_2.11:3.5.0" \
+    target/scala-2.11/mimic3_phenotyping_2.11-1.0.jar \
+    -i "file:////mnt/dev/mimic3/" \
+    -o "file:///home/hodapp/source/bd4h-project-code/data/" \
+    -m -c -h -r -b --icd9a 428 --icd9b 584 -l "1742-6"
+
+python timeseries_plots.py -d ./data -o ./data --icd9a 428 --icd9b 584 --loinc 1742-6
+python feature_learning.py -d ./data -o ./data --icd9a 428 --icd9b 584 --loinc 1742-6 --activity_l1 0.0001 --weight_l2 0.001 --save_model 428_584_1742-6.h5 --tsne --logistic_regression
+```
+
+```
+spark-submit --master "local[*]" \
+    --repositories https://oss.sonatype.org/content/groups/public/ \
+    --packages "com.github.scopt:scopt_2.11:3.5.0" \
+    target/scala-2.11/mimic3_phenotyping_2.11-1.0.jar \
+    -i "file:////mnt/dev/mimic3/" \
+    -o "file:///home/hodapp/source/bd4h-project-code/data/" \
+    -m -c -h -r -b --icd9a 518 --icd9b 584 -l "11558-4"
+
+python timeseries_plots.py -d ./data -o ./data --icd9a 518 --icd9b 584 --loinc 11558-4
+python feature_learning.py -d ./data -o ./data --icd9a 518 --icd9b 584 --loinc 11558-4 --activity_l1 0.0001 --weight_l2 0.001 --tsne --logistic_regression
 ```
 
 Known Problems & Needed Improvements
@@ -74,11 +100,12 @@ Known Problems & Needed Improvements
   I use `saveAsObjectFile`.
 - Messages like this still occur; they might not be problematic but
   should be looked at:
-
-    WARN netlib.LAPACK: Failed to load implementation from: com.github.fommil.netlib.NativeSystemLAPACK
-    WARN netlib.LAPACK: Failed to load implementation from: com.github.fommil.netlib.NativeRefLAPACK
-    WARN netlib.BLAS: Failed to load implementation from: com.github.fommil.netlib.NativeSystemBLAS
-    WARN netlib.BLAS: Failed to load implementation from: com.github.fommil.netlib.NativeRefBLAS
+```
+WARN netlib.LAPACK: Failed to load implementation from: com.github.fommil.netlib.NativeSystemLAPACK
+WARN netlib.LAPACK: Failed to load implementation from: com.github.fommil.netlib.NativeRefLAPACK
+WARN netlib.BLAS: Failed to load implementation from: com.github.fommil.netlib.NativeSystemBLAS
+WARN netlib.BLAS: Failed to load implementation from: com.github.fommil.netlib.NativeRefBLAS
+```
 
 ### Python code
 - The code on occasion will segfault, and I have not yet been able to
