@@ -60,3 +60,5 @@ Known Problems
   sample frequency for the interpolation after Gaussian process
   regression.  At a minimum, the code should supply some statistics
   such as average warped time-series length.
+- I don't know of any good way to make Spark overwrite RDD files when
+  I use `saveAsObjectFile`.
