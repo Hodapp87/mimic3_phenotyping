@@ -4,13 +4,10 @@
 
 import utils
 
-import os
 import pandas
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import numpy
-import math
-
 
 def gpr_plot(raw_subdf, gpr_subdf, ax = None, labels = True, legend = True):
     """Plot the results from a "raw" time-series sub-dataframe, and from a
@@ -84,7 +81,8 @@ def plots():
     #suffix = "276_427_50820"
     data_dir = "./data/"
     #suffix = "cohort_518_584_11558-4"
-    suffix = "cohort_428_584_1742-6"
+    #suffix = "cohort_428_584_1742-6"
+    suffix = "cohort_428_571_1742-6"
 
     ts_raw = pandas.read_csv(
         utils.get_single_csv("%s/%s_train.csv" % (data_dir, suffix)))
@@ -109,7 +107,6 @@ def plots():
     l = list(ts_raw_groups.groups.keys())
     l.sort()
     idx = numpy.random.randint(len(l))
-    print(idx)
     group_id = l[idx]
     gpr_plot(ts_raw_groups.get_group(group_id), ts_gpr_groups.get_group(group_id))
     plt.title(str(group_id))
