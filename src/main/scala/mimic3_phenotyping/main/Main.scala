@@ -224,7 +224,7 @@ object Main {
         save(f"${config.outputPath}/${config.suffix}_predict.csv")
 
       val testing_flat : DataFrame = Utils.
-        flattenPredictedTimeseries(spark, training)
+        flattenPredictedTimeseries(spark, testing)
       testing_flat.
         write.
         mode(SaveMode.Overwrite).
