@@ -420,7 +420,7 @@ object Main {
         val labs_cohort1_reduced = labs_cohort1.sample(false, count2/count1)
         labs_cohort1_reduced.union(labs_cohort2)
       } else {
-        val labs_cohort2_reduced = labs_cohort1.sample(false, count1/count2)
+        val labs_cohort2_reduced = labs_cohort2.sample(false, count1/count2)
         labs_cohort2_reduced.union(labs_cohort1)
       }
     } else {
