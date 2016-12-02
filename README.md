@@ -33,13 +33,13 @@ Example run
 ----
 
 ```
-spark-submit --master "local[*]"
-    --repositories https://oss.sonatype.org/content/groups/public/
-    --packages "com.github.scopt:scopt_2.11:3.5.0"
-    target/scala-2.11/mimic3_phenotyping_2.11-1.0.jar
-    -i "file:////mnt/dev/mimic3/"
-    -o "file:///home/hodapp/source/bd4h-project-code/data/"
-    -m -c -h --icd9a 518 --icd9b 584 -l "11558-4"
+spark-submit --master "local[*]" \
+    --repositories https://oss.sonatype.org/content/groups/public/ \
+    --packages "com.github.scopt:scopt_2.11:3.5.0" \
+    target/scala-2.11/mimic3_phenotyping_2.11-1.0.jar \
+    -i "file:////mnt/dev/mimic3/" \
+    -o "file:///home/hodapp/source/bd4h-project-code/data/" \
+    -m -c -r --icd9a 428 --icd9b 571 -l "1742-6"
 
 python timeseries_plots.py -d ./data -o ./data --icd9a 428 --icd9b 571 --loinc 1742-6
 python feature_learning.py -d ./data -o ./data --icd9a 428 --icd9b 571 --loinc 1742-6 --activity_l1 0.00004 --weight_l2 0.0005
