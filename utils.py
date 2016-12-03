@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 # (c) 2016 Chris Hodapp, chodapp3@gatech.edu
+# utils.py: Utility functions used elsewhere
 
 import os
 

@@ -50,9 +50,17 @@ python feature_learning.py -d ./data -o ./data \
     --load_model 428_584_1742-6.h5 --tsne --logistic_regression
 ```
 
+The `spark-submit` command still sometimes exhibits an issue in which
+it completes the job but fails to return to the prompt.  Check Spark's
+web UI (i.e. http://localhost:4040) for all jobs actually being done.
+
 For expediency, this will skip hyperparameter optimization (which can
 take 20-30 minutes depending on machine) and use hyperparameters
 already estimated, and it will use weights from a pre-trained neural
 network instead of training it.  To actually run through the full
 process, add `-h` to the first command, and remove the `--load_model`
 option from the `feature_learning` invocation.
+
+All output will be in the `data` directory in PNG and EPS format.
+This will include CSV and Parquet files from the Spark code, and PNG
+and EPS files from the Python code.

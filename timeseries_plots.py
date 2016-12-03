@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 
 # (c) 2016 Chris Hodapp, chodapp3@gatech.edu
+# timeseries_plots.py: Producing plots of original, warped, and
+# GPR-interpolated time-series data from a prior run of the Spark
+# code.
 
 import utils
 

@@ -1,6 +1,12 @@
 #!/usr/bin/env python
 
 # (c) 2016 Chris Hodapp, chodapp3@gatech.edu
+# feature_learning.py: Tool for reading in data from a prior Spark
+# run, conditioning it for input to an autoencoder, greedy layerwise
+# training an autoencoder on it (or loading prior trained results),
+# producing some plots of neural network weights, and using the
+# learned features for t-SNE visualization and a logistic regression
+# classifier.
 
 import utils
 
@@ -390,11 +396,13 @@ def display_metrics(Y_pred,Y_true):
     print("")
 
 if args.logistic_regression:
+    print("Logistic regression on 1st layer features:")
     model = sklearn.linear_model.LogisticRegression()
     model.fit(features1, x_labels_num)
     pred = model.predict(features1_test)
     display_metrics(pred, x_labels_num_test)
 
+    print("Logistic regression on 2nd layer features:")
     model = sklearn.linear_model.LogisticRegression()
     model.fit(features2, x_labels_num)
     pred = model.predict(features2_test)

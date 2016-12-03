@@ -88,7 +88,7 @@ object Main {
 
       opt[Int]('p', "padding_length").optional().action { (x,c) =>
         c.copy(paddingLength = x)
-      }.text("Total padding to add at beginning and end of interpolated series (rounded down to even); default 10")
+      }.text("Total padding to add at beginning and end of interpolated series (rounded down to even); default 20")
 
       opt[Unit]('b', "balance_icd9").optional().action { (x,c) =>
         c.copy(balanceIcd9 = true)
