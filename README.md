@@ -23,6 +23,9 @@ Building
 everything.  `sbt package` should produce a JAR that `spark-submit`
 can handle.
 
+`pip install keras h5py scikit-learn pydot-ng` should handle the
+Python prerequisites.
+
 Example run
 ----
 
@@ -39,15 +42,15 @@ spark-submit --master "local[*]" \
     target/scala-2.11/mimic3_phenotyping_2.11-1.0.jar \
     -i "file:////mnt/dev/mimic3/" \
     -o "file:///home/hodapp/source/bd4h-project-code/data/" \
-    -m -c -r -b --icd9a 428 --icd9b 584 -l "1742-6"
+    -m -c -r -b --icd9a 428 --icd9b 571 -l "1742-6"
 
 python timeseries_plots.py -d ./data -o ./data \
-    --icd9a 428 --icd9b 584 --loinc 1742-6
+    --icd9a 428 --icd9b 571 --loinc 1742-6
     
 python feature_learning.py -d ./data -o ./data \
-    --icd9a 428 --icd9b 584 --loinc 1742-6 \
+    --icd9a 428 --icd9b 571 --loinc 1742-6 \
     --activity_l1 0.0001 --weight_l2 0.001 \
-    --load_model 428_584_1742-6.h5 --tsne --logistic_regression
+    --load_model 428_571_1742-6.h5 --tsne --logistic_regression
 ```
 
 The `spark-submit` command still sometimes exhibits an issue in which
