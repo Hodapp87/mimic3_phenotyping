@@ -3,6 +3,9 @@ mimic3_phenotyping
 
 Chris Hodapp, chodapp3@gatech.edu
 
+This source code is for a class project in OMSCS.  The paper
+associated with this is <https://arxiv.org/abs/1612.08425>.
+
 Requirements
 ----
 
@@ -24,7 +27,8 @@ everything.  `sbt package` should produce a JAR that `spark-submit`
 can handle.
 
 `pip install keras h5py scikit-learn pydot-ng` should handle the
-Python prerequisites.
+Python prerequisites, but note that you may need to configure Keras or
+its backend further in order to have GPU acceleration.
 
 Example run
 ----
