@@ -1,10 +1,17 @@
 mimic3_phenotyping
 ==================
 
-Chris Hodapp, chodapp3@gatech.edu
+(c) 2016 Chris Hodapp, chodapp3@gatech.edu
 
-This source code is for a class project in OMSCS.  The paper
-associated with this is <https://arxiv.org/abs/1612.08425>.
+This is the source code for a project I did at the end of 2016 which
+applied some machine learning techniques (mostly unsupervised
+learning) to the [MIMIC-III Critical Care
+Database](https://mimic.mit.edu/about/mimic/).  This project was for a
+course I took as part of my CS masters: [CSE 8803 - Big Data Analytics
+for Healthcare](http://www.sunlab.org/teaching/cse8803/fall2016/).
+
+The paper describing this work in more detail is:
+<https://arxiv.org/abs/1612.08425>
 
 Requirements
 ----
